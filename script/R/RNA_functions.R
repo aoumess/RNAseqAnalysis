@@ -398,7 +398,7 @@ get_msigdbr_collections <- function() {
 
 ## Get KEGG GMT ====
 get_kegg_gmt <- function(org = 'hsa', gmt_file = NULL, gene_id_type = 'ENTREZID', return_gmt = TRUE) {
-  kegg_gmt <- EnrichmentBrowser::getGenesets(org = 'hsa', db = 'kegg', cache = FALSE, gene.id.type = gene_id_type)
+  kegg_gmt <- EnrichmentBrowser::getGenesets(org = org, db = 'kegg', cache = FALSE, gene.id.type = gene_id_type)
   if(!is.null(gmt_file)) EnrichmentBrowser::writeGMT(gs = kegg_gmt, gmt.file = gmt_file)
   if(!is.null(return_gmt)) return(kegg_gmt)
 }
@@ -418,6 +418,9 @@ gmt_convert <- function(gmt_file_in = NULL, gmt_file_out = NULL, gene_type_in = 
   
   ## Get conversion df from bitr
   gmult <- as.data.frame(base::as.list(clusterProfiler::bitr(unique(in_gmt$gene), fromType = toupper(gene_type_in), toType = toupper(gene_type_out), OrgDb = paste0(msigdbr2org(species), '.db'))))
+  ## Quantifying genes not identified
+  out_genes <- in_gmt$gene[!in_gmt$gene %in% gmult[,1]]
+  if (length(out_genes) > 0) warning(paste0(length(out_genes), ' genes could not be converted : [', paste(out_genes, collapse = ', '), ']'))
   ## Filter multi-hits
   gmult <- gmult[Biobase::isUnique(gmult[[gene_type_in]]) & Biobase::isUnique(gmult[[gene_type_out]]),]
   ## Set conversion vector
@@ -434,7 +437,7 @@ gmt_convert <- function(gmt_file_in = NULL, gmt_file_out = NULL, gene_type_in = 
     in_gmt$gene[in_gmt$term == x]
   })
   names(out_gmt) <- levels(in_gmt$term)
-  EnrichmentBrowser::writeGMT(gs = out_gmt, gmt.file = gzfile(gmt_file_out))
+  EnrichmentBrowser::writeGMT(gs = out_gmt, gmt.file = gzfile(sub(pattern = '\\.gmt$', replacement = '.gmt.gz', ignore.case = TRUE, x = gmt_file_out)))
 }
 
 
@@ -768,7 +771,7 @@ full_design_generator <- function(init_df = NULL, samples_colname = NULL, covar_
   if(is.null(samples_colname)) stop('A column name to identify samples in init_df is required !')
   if(!samples_colname %in% colnames(init_df)) stop('Column name [', samples_colname, '] not found in init_df !')
   if(!add_others & only_others) stop("Can't restrict to 'vs_Other' comparisons if add_others is not set to TRUE !")
-  if(length(covar_colnames) != (ncol(init_df)-1)) stop ('length(covar_colnames) != nrow(init_df) !')
+  # if(length(covar_colnames) != (ncol(init_df)-1)) stop ('length(covar_colnames) != ncol(init_df) !')
   
   ## Cleaning bad chars
   ### Column names in initial df
@@ -777,8 +780,8 @@ full_design_generator <- function(init_df = NULL, samples_colname = NULL, covar_
   for (myc in seq_len(ncol(init_df))) init_df[[myc]] <- gsub(pattern = "\\W", replacement = '.', x = init_df[[myc]])
   ### samples_colname & covar_colnames
   # covar_colnames <- gsub(pattern = "\\W", replacement = '.', x = covar_colnames)
-  covar_colnames[vapply(covar_colnames, is.null, TRUE)] <- ''
   covar_colnames <- lapply(covar_colnames, function(x) { gsub(pattern = "\\W", replacement = '.', x = x) })
+  # covar_colnames[vapply(covar_colnames, is.null, TRUE)] <- ''
   samples_colname <- gsub(pattern = "\\W", replacement = '.', x = samples_colname)
   
   
@@ -933,6 +936,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## assess.factor          logical             Perform assessment of factor covariates using the provided column name(s) corresponding to factor data columns in annot.df
 ## assess.conti           logical             Perform assessment of continuous covariates using the provided column name(s) corresponding to continuous data columns in annot.df
 ## min_count              0<int>+inf          Minimum total counts to keep a feature (gene) : allows to discarded not/poorly expressed features
+## min_sample_freq        0<numeric<1         Minimal frequency of samples considered expressed (counts >0). Globally or per-class, depending on the 'per_class' parameter. Defaults to 50%.
 ## per_class              logical             Apply the min_count filtering on each compared class rather than the total sample population
 ## adjp.max               0<numeric<1         BH FDR-adjusted p-value cut-off to consider differential genes as significant
 ## lfc.min                numeric+            Minimal logFoldChange to consider differential genes
@@ -959,7 +963,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## boxplots               bool                If TRUE, draw boxplots of or.top.max genes
 ## save.wald              bool                If TRUE, save the DESeq2 object containing the results of the Wald test. This is FALSE by default, as the resulting object can be pretty big.
 ## color.palette          vec(color)          Vector of 3 colors used for the expression heatmap (lower values, middle, higher)
-DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.factor = NULL, assess.conti = NULL, min_count = 5L, min_samples = 2L, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
+DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.factor = NULL, assess.conti = NULL, min_count = 5L, min_sample_freq = .5, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
   
   if (tolower(species) == 'homo sapiens') {
     Org <- 'org.Hs'
@@ -1104,7 +1108,10 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
     message('Features filtering ...')
     message('Features PRE : ', nrow(cur.exp.mat))
     cf_min <- data.frame(COVAR = rep(FALSE, nrow(cur.exp.mat)))
+    
+    ## Features filtering handling total / per-class cases
     if (per_class) {
+      ## Per-class calse
       ## Minimum counts criterion
       ff_min <- as.data.frame(lapply(c(cur.condA, cur.condB), function(cc) {
         ccs <- cur.annot.df[[cur.cond]] == cc
@@ -1123,18 +1130,38 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
           cf_min <- cbind(cf_min, tmp_min)
         }
       }
-      # message(str(cf_min))
+      # ## Minimum expressed samples criterion
+      # sf_min <- as.data.frame(lapply(c(cur.condA, cur.condB), function(cc) {
+      #   ccs <- cur.annot.df[[cur.cond]] == cc
+      #   return(length(which(ccs)) - matrixStats::rowCounts(x = cur.exp.mat[,ccs], value = 0) >= min(min_samples, length(which(ccs))))
+      # }))
+      # colnames(sf_min) <- c(cur.condA, cur.condB)
+      # ## minimum total counts criterion per differential class
+      # ff_feats <- base::rowSums(ff_min) > 0
+      # ## minimum total counts criterion per covariate(s) class
+      # cf_feats <- base::rowSums(cf_min) == 0
+      # ## minimum amount of samples with expression per class
+      # sf_feats <- base::rowSums(sf_min) > 0
+      # ok_feats <- ff_feats & sf_feats & cf_feats
+      
+      ### WIP : switching from AMOUNT of expressed sample to PROPORTION
       ## Minimum expressed samples criterion
       sf_min <- as.data.frame(lapply(c(cur.condA, cur.condB), function(cc) {
         ccs <- cur.annot.df[[cur.cond]] == cc
-        return(length(which(ccs)) - matrixStats::rowCounts(x = cur.exp.mat[,ccs], value = 0) >= min(min_samples, length(which(ccs))))
+        # return(length(which(ccs)) - matrixStats::rowCounts(x = cur.exp.mat[,ccs], value = 0) >= min(min_samples, length(which(ccs))))
+        return( (1 - (matrixStats::rowCounts(x = cur.exp.mat[,ccs], value = 0) / length(which(ccs)))) >= min_sample_freq )
       }))
       colnames(sf_min) <- c(cur.condA, cur.condB)
+      ## minimum total counts criterion per differential class
       ff_feats <- base::rowSums(ff_min) > 0
+      ## minimum total counts criterion per covariate(s) class
       cf_feats <- base::rowSums(cf_min) == 0
+      ## minimum amount of samples with expression per class
       sf_feats <- base::rowSums(sf_min) > 0
-      ok_feats <- ff_feats & sf_feats & cf_feats
+      # sf_feats <- all(sf_min)
+      ok_feats <- ff_feats & cf_feats & sf_feats
     } else {
+      ## TOTAL case
       ok_feats <- base::rowSums(cur.exp.mat) >= min_count
     }
     cur.exp.mat <- cur.exp.mat[ok_feats,]
@@ -2375,7 +2402,7 @@ lmmSeq_run <- function(ln_mat = NULL, time_colname = 'TimePoint', covar_colname 
 
 
 ## Run immunedeconv on a matrix ====
-immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantiseq', 'epic', 'estimate', 'mcp_counter', 'abis', 'cibersort'), is_array = FALSE, is_tumor = TRUE, cibersort_binary_path = NULL, cibersort_lm22_path = NULL, cibersort_absolute = TRUE, cibersortx_resfile = NULL, cibersortx_absolute = TRUE) {
+immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantiseq', 'epic', 'estimate', 'mcp_counter', 'abis', 'cibersort'), is_array = FALSE, is_tumor = TRUE, cibersort_binary_path = NULL, cibersort_lm22_path = NULL, cibersort_absolute = TRUE, cibersortx_resfile = NULL, cibersortx_absolute = TRUE, ecotyper_resfile = NULL) {
   
   if (to_tpm) {
     ## Normalize to TPM
@@ -2450,6 +2477,18 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
     id_res_all[[paste(c('cibersortx', absword, 'score'), collapse = '_')]] <- cbx_tib[score_range,]
     rm(cbx_res, cbx_tib, cbx_mat)
   }
+  
+  ## Add EcoTyper results ?
+  if (!is.null(ecotyper_resfile)) {
+    et_res <- data.table::fread(file = ecotyper_resfile, sep = '\t', header = TRUE, data.table = FALSE)
+    et_mat <- t(as.matrix(et_res[,-1]))
+    et_tib <- tibble::as_tibble(data.frame('cell_type' = colnames(et_res)[-1], et_mat))
+    colnames(et_tib) <- c('cell_type', et_res[,1])
+    ### ... quantifications
+    id_res_all$ecotyper <- et_tib
+    rm(et_res, et_tib, et_mat)
+  }
+  
   return(id_res_all)
 }
 
@@ -2497,10 +2536,14 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
     ## Read terms from GMT
     gmt_db <- suppressWarnings(suppressMessages(GSEABase::getGmt(con = gmt_file, geneIdType = GSEABase::EntrezIdentifier(), collectionType = GSEABase::NullCollection())))
     
-    ## Create gParam from expression matrix and terms
-    g_param <- suppressWarnings(suppressMessages(GSVA::gsvaParam(exprData = geo_gsva, geneSets = gmt_db, kcdf = 'Gaussian', minSize = enr_min_genes)))
-    ## Run GSVA
-    gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(param = g_param, verbose = FALSE)))
+    ## RUN (old package version)
+    gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(expr = geo_gsva, gset.idx.list = gmt_db, kcdf = 'Gaussian', min.sz = enr_min_genes)))
+    
+    # ## RUN (newer package version)
+    # ## Create gParam from expression matrix and terms
+    # g_param <- suppressWarnings(suppressMessages(GSVA::gsvaParam(exprData = geo_gsva, geneSets = gmt_db, kcdf = 'Gaussian', minSize = enr_min_genes)))
+    # ## Run GSVA
+    # gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(param = g_param, verbose = FALSE)))
     
     ### OL detection : grDevices::boxplot.stats
     if(nrow(gsva_res)>=3) {
@@ -2581,7 +2624,7 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
 }
 
 
-## Perform Kruskal-Wallis differential test on GSVA results according to clinical annotation ====
+## Perform Kruskal-Wallis differential test on GSVA results according to categorical clinical annotation ====
 gsva_diff_run <- function(gsva_res = NULL, annot_df = NULL, method = 'KW', paired = FALSE, diff_factor = NULL, max.p = .05, out_dir = getwd()) {
   
   ## Checks
@@ -2603,21 +2646,124 @@ gsva_diff_run <- function(gsva_res = NULL, annot_df = NULL, method = 'KW', paire
   grd_all <- lapply(diff_factor, function(ppf) {
     message('. ', ppf)
     ## Looping on gsva results
-    grdiff_all <- lapply(names(gsva_all), function(ga) {
+    grdiff_all <- lapply(names(gsva_res), function(ga) {
       message('  . ', ga)
       ## Looping on terms
-      kw_l <- sapply(seq_len(nrow(gsva_all[[ga]])), function(x) {
+      kw_l <- sapply(seq_len(nrow(gsva_res[[ga]])), function(x) {
         # message(x)
-        data_df <- data.frame(gsva = unname(unlist(gsva_all[[ga]][x,])), class = as.factor(annot_df[[ppf]]))
+        data_df <- data.frame(gsva = unname(unlist(gsva_res[[ga]][x,])), class = as.factor(annot_df[[ppf]]))
+        ## Testing the number of levels
+        if (nlevels(data_df$class) < 2) {
+          kw_df <- data.frame(Statistic = rep(x = NA, nrow(data_df)))
+          kw_df$adj.p <- kw_df$raw.p <- kw_df$Statistic
+        } else {
+          ## KW/W test
+            if (tolower(method) %in% 'kw') {
+            kw_t <- kruskal.test(gsva ~ class, data = data_df)
+          } else if (tolower(method) %in% 'w') {
+            # kw_t <- wilcox.test(gsva ~ class, data = data_df, paired = paired)
+            kw_t <- wilcox.test(x = data_df$gsva[data_df$class == levels(data_df$class)[2]], y = data_df$gsva[data_df$class == levels(data_df$class)[1]], paired = paired)
+          }
+          ## Store results in a df
+          kw_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0)
+        }
+        ## Add classes median
+        kn <- aggregate(gsva ~ class, data = data_df, length)
+        ksumry <- aggregate(gsva ~ class, data = data_df, summary)
+        ksd <- aggregate(gsva ~ class, data = data_df, sd)
+        for (kx in seq_len(nrow(ksumry$gsva))) {
+          kw_df[[paste0('N_', kn$class[kx])]] <- kn$gsva[kx]
+          kw_df[[paste0('Median_', ksumry$class[kx])]] <- ksumry$gsva[kx, 'Median']
+          kw_df[[paste0('Sd_', ksd$class[kx])]] <- ksd$gsva[kx]
+        }
+        return(kw_df)
+      }, simplify = FALSE)
+      kw_res <- data.frame(Term = gsub(pattern = '\\%', replacement = '_', x = rownames(gsva_res[[ga]])), Reduce(f = rbind, x = kw_l))
+      rm(kw_l)
+      return(kw_res)
+    })
+    names(grdiff_all) <- names(gsva_res)
+    
+    ## Add AdjP
+    for (l in names(grdiff_all)) grdiff_all[[l]]$adj.p <- p.adjust(p = grdiff_all[[l]]$raw.p, method = "BH")
+    
+    ## Sort by AdjP, Rawp
+    for (l in names(grdiff_all)) grdiff_all[[l]] <- grdiff_all[[l]][order(grdiff_all[[l]]$adj.p, grdiff_all[[l]]$raw.p), ]
+    
+    ## Output results
+    Hstyle <- openxlsx::createStyle(halign = 'center', valign = 'center', textDecoration = 'bold')
+    FLOATstyle <- openxlsx::createStyle(numFmt = '0.000')
+    SCstyle <- openxlsx::createStyle(numFmt = '0.00E00')
+    BLUEstyle <- openxlsx::createStyle(bgFill = 'lightblue')
+    wb <- openxlsx::createWorkbook(title = paste0(ppf, ' GSVA DiffTest'))
+    for (l in names(grdiff_all)) {
+      sname <- strtrim(x = l, width = 31)
+      cur.fc <- min(max(sapply(grdiff_all[[l]][,1], nchar)), 30) * 3
+      openxlsx::addWorksheet(wb = wb, sheetName = sname)
+      xl_ncol <- ncol(grdiff_all[[l]])
+      ## Header stype
+      openxlsx::addStyle(wb = wb, sheet = sname, style = Hstyle, rows = 1, cols = 1:xl_ncol)
+      ## Float style
+      # openxlsx::addStyle(wb = wb, sheet = sname, style = FLOATstyle, rows = 2:(nrow(grdiff_all[[l]])+1), cols = c(2,5:ncol(grdiff_all[[l]])+1), gridExpand = TRUE, stack = TRUE)
+      xl_rep <- (xl_ncol-6) %/% 3 +1
+      # message(xl_rep)
+      openxlsx::addStyle(wb = wb, sheet = sname, style = FLOATstyle, rows = 2:(nrow(grdiff_all[[l]])+1), cols = c(2, rep(0:(xl_rep-1), each = 2)*3 + rep(0:1, times = xl_rep) + 6), gridExpand = TRUE, stack = TRUE)
+      ## Scientific style
+      openxlsx::addStyle(wb = wb, sheet = sname, style = SCstyle, rows = 2:(nrow(grdiff_all[[l]])+1), cols = 3:4, gridExpand = TRUE, stack = TRUE)
+      ## Pval conditional
+      openxlsx::conditionalFormatting(wb = wb, sheet = sname, rows = 2:(nrow(grdiff_all[[l]])+1), cols = 3:4, rule = paste0('<', max.p), style = BLUEstyle)
+      openxlsx::setColWidths(wb = wb, sheet = sname, cols = 2:4, widths = 10)
+      openxlsx::setColWidths(wb = wb, sheet = sname, cols = 1, widths = cur.fc)
+      openxlsx::freezePane(wb = wb, sheet = sname, firstRow = TRUE, firstCol = TRUE)
+      ## Add sheet
+      openxlsx::writeData(wb = wb, sheet = sname, x = grdiff_all[[l]], keepNA = TRUE, na.string = 'NA')
+    }
+    ## Save XLSX
+    pairedword <- if(paired) '.paired' else NULL
+    openxlsx::saveWorkbook(wb = wb, file = paste0(out_dir, '/', ppf, '_GSVA_DiffTest.', method, pairedword, '_results.xlsx'), overwrite = TRUE)
+    rm(wb)
+    return(grdiff_all)
+  })
+  names(grd_all) <- unlist(diff_factor)
+  return(grd_all)
+}
+
+
+## Perform a correlation test on GSVA results according to continuous clinical annotation ====
+gsva_cor_run <- function(gsva_res = NULL, annot_df = NULL, method = 'spearman', paired = FALSE, cor_colnames = NULL, max.p = .05, out_dir = getwd()) {
+  
+  ## Checks
+  if (is.null(gsva_res)) stop('An output of gsva_run() is required !')
+  if (!is.list(gsva_res)) stop('gsva_res should be a list, the output of gsea_run() !')
+  if (is.null(cor_colnames)) stop('A list of annotation to perform the differential tests is required !')
+  if (!tolower(method) %in% c('pearson', 'spearman')) stop('Only "spearman" or "pearson" methods are allowed !')
+  if (!is.logical(paired)) stop('paired should be a logical !')
+  if (is.null(annot_df)) stop('No annotation table provided !')
+  if (!is.numeric(max.p)) stop('max_p should be a numeric in ]0:1] !')
+  if (max.p <= 0) stop('max_p should be a numeric in ]0:1] !')
+  if (max.p > 1) stop('max_p should be a numeric in ]0:1] !')
+  if (!dir.exists(paths = out_dir)) stop('Provided out_dir does not exist !')
+  if (paired) message('Using paired mode ...')
+  # if ((tolower(method) %in% 'kw') & paired) warning('Paired testing is active but KW is requested, so paired is ignored !')
+  
+  ## Run
+  ## Looping on factors to compare
+  grd_all <- lapply(diff_factor, function(ppf) {
+    message('. ', ppf)
+    ## Looping on gsva results
+    grdiff_all <- lapply(names(gsva_res), function(ga) {
+      message('  . ', ga)
+      ## Looping on terms
+      kw_l <- sapply(seq_len(nrow(gsva_res[[ga]])), function(x) {
+        # message(x)
+        data_df <- data.frame(gsva = unname(unlist(gsva_res[[ga]][x,])), class = as.factor(annot_df[[ppf]]))
         ## KW test
         if (tolower(method) %in% 'kw') {
           kw_t <- kruskal.test(gsva ~ class, data = data_df)
-          kw_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0)
         } else if (tolower(method) %in% 'w') {
-          # kw_t <- wilcox.test(gsva ~ class, data = data_df, paired = paired)
           kw_t <- wilcox.test(x = data_df$gsva[data_df$class == levels(data_df$class)[2]], y = data_df$gsva[data_df$class == levels(data_df$class)[1]], paired = paired)
-          kw_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0)
-        } 
+        }
+        kw_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0)
         ## Add classes median
         ksumry <- aggregate(gsva ~ class, data = data_df, summary)
         ksd <- aggregate(gsva ~ class, data = data_df, sd)
@@ -2627,11 +2773,11 @@ gsva_diff_run <- function(gsva_res = NULL, annot_df = NULL, method = 'KW', paire
         }
         return(kw_df)
       }, simplify = FALSE)
-      kw_res <- data.frame(Term = gsub(pattern = '\\%', replacement = '_', x = rownames(gsva_all[[ga]])), Reduce(f = rbind, x = kw_l))
+      kw_res <- data.frame(Term = gsub(pattern = '\\%', replacement = '_', x = rownames(gsva_res[[ga]])), Reduce(f = rbind, x = kw_l))
       rm(kw_l)
       return(kw_res)
     })
-    names(grdiff_all) <- names(gsva_all)
+    names(grdiff_all) <- names(gsva_res)
     
     ## Add AdjP
     for (l in names(grdiff_all)) grdiff_all[[l]]$adj.p <- p.adjust(p = grdiff_all[[l]]$raw.p, method = "BH")
@@ -2668,7 +2814,6 @@ gsva_diff_run <- function(gsva_res = NULL, annot_df = NULL, method = 'KW', paire
   names(grd_all) <- unlist(diff_factor)
   return(grd_all)
 }
-
 
 
 

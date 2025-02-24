@@ -81,6 +81,8 @@ n.permut = if sim.p == TRUE, number of permutations to perform
 
 ## MAIN FUNCTION
 chifisher <- function(annot.table = NULL, query.vec = NULL, target.vec = NULL, test.type = "F", test.type.2 = "W", test.type.N = "KW", numeric.as.continuous = FALSE, out.dir = getwd(), make.plot = TRUE, sim.p = TRUE, n.permut = 1E+6) {
+  
+  ## ! vcd to install
   ## Loading annotations
   sfix <- ""
   # if (simulate) sfix <- "_SIMU"
@@ -184,10 +186,10 @@ chifisher <- function(annot.table = NULL, query.vec = NULL, target.vec = NULL, t
             # rownames(class.summary) <- paste0(colnames(annot)[ctnum], ".", rownames(class.summary))
 
 
-            rcon <- file(paste0(outname, ".txt"), "w")
+            rcon <- file(paste0(outname, ".tsv"), "w")
             writeLines(paste(c(colnames(annot.table)[ctnum], colnames(class.summary)), collapse = "\t"), rcon)
             close(rcon)
-            write.table(class.summary, file = paste0(outname, ".txt"), quote = FALSE, row.names = TRUE, col.names = FALSE, sep="\t", append = TRUE)
+            write.table(class.summary, file = paste0(outname, ".tsv"), quote = FALSE, row.names = TRUE, col.names = FALSE, sep="\t", append = TRUE)
 
             if (make.plot) {
               mycounts <- vapply(sort(unique(annot.table[[query.vec[k1]]])), function(x) { length(which(annot.table[[query.vec[k1]]] == x))}, 1)
@@ -235,9 +237,9 @@ chifisher <- function(annot.table = NULL, query.vec = NULL, target.vec = NULL, t
       			tlab <- paste(ct, levels(groups), sep=".")
       			dimnames(mymat) <- list(c(tlab), c(clab))
 
-      			write.table( rbind(c(colclass, levels(classes)), cbind(rownames(mymat), mymat)), paste0(outname, ".txt"), quote=F, row.names=F, col.names=F, sep="\t", append=T)
-      			if (test.type == "F") write.table(paste("\n",Tres$method, ":\np-value = ", Tres$p.value, "\n\n\n", sep=""), paste0(outname, ".txt"), append=T, sep="\t", quote=F, col.names=F, row.names=F)
-      			if (test.type == "X2") write.table(paste("\n",Tres$method, ":\nX2 statistic = ", Tres$statistic, ", p-value = ", Tres$p.value, "\n\n\n", sep=""), paste0(outname, ".txt"), append=T, sep="\t", quote=F, col.names=F, row.names=F)
+      			write.table( rbind(c(colclass, levels(classes)), cbind(rownames(mymat), mymat)), paste0(outname, ".tsv"), quote=F, row.names=F, col.names=F, sep="\t", append=T)
+      			if (test.type == "F") write.table(paste("\n",Tres$method, ":\np-value = ", Tres$p.value, "\n\n\n", sep=""), paste0(outname, ".tsv"), append=T, sep="\t", quote=F, col.names=F, row.names=F)
+      			if (test.type == "X2") write.table(paste("\n",Tres$method, ":\nX2 statistic = ", Tres$statistic, ", p-value = ", Tres$p.value, "\n\n\n", sep=""), paste0(outname, ".tsv"), append=T, sep="\t", quote=F, col.names=F, row.names=F)
       		}
 
     			if(is.na(Tres$p.value)) message("NA") else if (Tres$p.value < 1E-05) message("*****") else if (Tres$p.value < 1E-03) message("***") else if (Tres$p.value < 5E-02) message("*") else if (Tres$p.value < 1E-01) message("~")
@@ -248,6 +250,12 @@ chifisher <- function(annot.table = NULL, query.vec = NULL, target.vec = NULL, t
   	  final[,k1] <- tpv
   	}
   }
-  write.table(rbind(c(paste(test.type, "tests", sep="-"), query.vec), cbind(target.vec, final)), file = paste0(out.dir, '/', test.type, "-", test.type.2, "-", test.type.N, "-TEST_globaltable", sfix, ".txt"), quote=F, row.names=F, col.names=F, sep="\t")
+  out.mat <- rbind(c(paste(test.type, "tests", sep="-"), query.vec), cbind(target.vec, final))
+  out.df <- data.frame(out.mat[-1,,drop = FALSE])
+  colnames(out.df) <- out.mat[1,]
+  # write.table(out.df, file = paste0(out.dir, '/', test.type, "-", test.type.2, "-", test.type.N, "-TEST_globaltable", sfix, ".txt"), quote=F, row.names=F, col.names=F, sep="\t")
+  write.table(x = out.df, file = paste0(out.dir, '/', test.type, "-", test.type.2, "-", test.type.N, "-TEST_globaltable", sfix, ".txt"), quote = FALSE, row.names = FALSE, sep="\t")
+  WriteXLS::WriteXLS(ExcelFileName = paste0(out.dir, '/', test.type, "-", test.type.2, "-", test.type.N, "-TEST_globaltable", sfix, ".xlsx"), x = out.df, AdjWidth = TRUE, BoldHeaderRow = TRUE, na = 'NA', FreezeRow = 1, FreezeCol = 1)
+  
 }
 
