@@ -64,47 +64,13 @@ box_categ <- list(
   ,
   'Progression' = 'Progression'
   ,
-  'Death status' = 'Death_status'
-  ,
-  'OS event' = 'OS_event'
-  ,
   'Type of sample' = 'Type_of_sample'
-  ,
-  'Liver type of sample' = 'Liver_type'
-  ,
-  'Metastatic CT line - 2 classes' = 'Metastatic_CT_line.3'
-  ,
-  'PFS - 2 classes - 3 monthes' = 'PFS.3_m'
-  ,
-  'PFS - 2 classes - 12 monthes' = 'PFS.12_m'
-  ,
-  'PFS - 3 classes (months)' = 'PFS.3.12_m'
-  ,
-  'prevICI' = 'prevICI'
-  ,
-  'Visceral metastasis' = 'Visceral_metastasis'
-  ,
-  'Bone metastasis' = 'Bone_metastasis'
-  ,
-  'De-novo metastasis' = 'De_novo_metastasis'
-  ,
-  'Dose (mg)' = 'Dose_mg'
 )
 
 
 ### VECTOR of annotation column names to assess as putative CONTINUOUS covariates. (this should be changed to a list in further updates, in sake of homogeneity with box_categ) Default are common ones for GeoMX RNA.
 conti_categ <- c(
   'TC.pc'
-  ,
-  'Age_at_diag_y'
-  ,
-  'Metastatic_line'
-  ,
-  'Metastatic_CT_line'
-  ,
-  'PFS_m'
-  ,
-  'OS_m'
   ,
   'Reads_by_run'
 )
@@ -128,7 +94,6 @@ adjp.max <- 5E-02
 # lfc.min <- 1
 lfc.min <- 0
 min_count <- 5L
-# min_samples <- 2
 min_sample_freq <- .5
 ## Types of distance to clusterize samples
 samples_dist_method <- c(
@@ -171,7 +136,8 @@ if(!is.null(custom_gmt_file)) {
   custom.do <- c(TRUE, TRUE)
 }
 
-## TMP (GSEA/ORA deactivated for tests, except for MsigDB:Hallmarks)
+
+## GSEA/ORA deactivated for tests, except for MsigDB:Hallmarks
 msigdb.do <- list(H = c(TRUE, TRUE))
 do.do <- c(FALSE, FALSE)
 go.do <- c(FALSE, FALSE)
