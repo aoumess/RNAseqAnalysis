@@ -250,7 +250,7 @@ de2 <- readRDS(file = input_RDS)
 ## Load additional annotations (needs to be synched with the current annot_df). WARNING : except for the annot_sn common column name, any column name in the additional table which is already present in the initial one will REPLACE the initial one !
 if (!is.null(annot_filename)) {
   ## Load additinal annotation table
-  comp_df <- as.data.frame(readxl::read_excel(path =  annot_filename, na = c('', 'na', 'NA')))
+  comp_df <- as.data.frame(x = readxl::read_excel(path =  annot_filename, na = c('', 'na', 'NA')))
   ## Clean colnames
   colnames(comp_df) <- gsub(pattern = "\\W", replacement = '.', x = colnames(comp_df))
   ## Synch it to the metadata
@@ -286,7 +286,7 @@ norm_method
 de2 <- DESeq2::estimateSizeFactors(object = de2)
 ## Save RAW exp
 saveRDS(de2, file = paste0(work_dir, '/DESeq2Obj_Raw.RDS'), compress = 'bzip2')
-write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2)), SummarizedExperiment::assay(de2)), file = gzfile(paste0(work_dir, '/Raw_counts_', ncol(SummarizedExperiment::assay(de2)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
+write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2)), SummarizedExperiment::assay(de2), check.names = FALSE), file = gzfile(paste0(work_dir, '/Raw_counts_', ncol(SummarizedExperiment::assay(de2)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
 ## Normalization
 if (tolower(norm_method) == 'vst') {
   message('Normalizing using vst ...')
@@ -297,7 +297,7 @@ if (tolower(norm_method) == 'vst') {
 }
 ## Save Normalized
 saveRDS(de2.norm, file = paste0(work_dir, '/DESeq2Obj_Norm.', tolower(norm_method), '.RDS'), compress = 'bzip2')
-write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2.norm)), SummarizedExperiment::assay(de2.norm)), file = gzfile(paste0(work_dir, '/Normalized.', norm_method, '_counts_', ncol(SummarizedExperiment::assay(de2.norm)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
+write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2.norm)), SummarizedExperiment::assay(de2.norm), check.names = FALSE), file = gzfile(paste0(work_dir, '/Normalized.', norm_method, '_counts_', ncol(SummarizedExperiment::assay(de2.norm)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
 conti_categ <- unique(c(conti_categ, 'sizeFactor'))
 
 ```
@@ -326,7 +326,7 @@ if (all(is.null(c(covar_factor_names, covar_conti_names)))) {
 }
 
 ## Save the matrix
-reg_df <- data.frame(Feature=rownames(supervised_mat), supervised_mat)
+reg_df <- data.frame(Feature=rownames(supervised_mat), supervised_mat, check.names = FALSE)
 WriteXLS::WriteXLS(x = reg_df, ExcelFileName = paste0(work_dir, '/Normalized_expression_matrix_', supervised_word, '.xlsx'), AdjWidth = TRUE, BoldHeaderRow = TRUE, na = 'NA')
 rm(reg_df)
 
@@ -356,6 +356,7 @@ if (!all(is.null(c(covar_factor_names, covar_conti_names)))) {
 
 ```
 
+
 ## PCA
 
 PCA is used to evaluate how the data dimensionality could be reduced from our multiple samples. Working on human data, we do not expect by default a high representation of the variance by a very limited set of very first components. It is also used to detect outlying samples, and in best cases gives ideas of the data structure (ie, most evident clusters).
@@ -368,7 +369,7 @@ dir.create(path = pca_dir, recursive = TRUE)
 for (bc in names(box_categ)) {
   suppressWarnings(de2.pca.batch <- DESeq2::plotPCA(de2.norm, intgroup = box_categ[[bc]], ntop = topvar))
   svg(filename = paste0(pca_dir, '/PCA_', box_categ[[bc]], '.svg'), width = 1600/96, height = 1200/96)
-  suppressWarnings(print(de2.pca.batch + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = de2.pca.batch$data$PC1, split = de2.pca.batch$data$group), PC2 = get_medoid(x = de2.pca.batch$data$PC2, split = de2.pca.batch$data$group), group = levels(de2.pca.batch$data$group)), shape = 13, size = 8) + ggplot2::labs(title = bc)))
+  suppressWarnings(print(de2.pca.batch + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = de2.pca.batch$data$PC1, split = de2.pca.batch$data$group), PC2 = get_medoid(x = de2.pca.batch$data$PC2, split = de2.pca.batch$data$group), group = levels(de2.pca.batch$data$group), check.names = FALSE), shape = 13, size = 8) + ggplot2::labs(title = bc)))
   svg_off()
 }
 ### Continuous
@@ -377,12 +378,12 @@ rv_selec <- order(rv, decreasing = TRUE)[seq_len(min(topvar, length(rv)))]
 for (conti.annot in unlist(conti_categ)) {
   pca_res <- prcomp(t(SummarizedExperiment::assay(de2.norm)[rv_selec,]))
   percentVar <- pca_res$sdev^2/sum(pca_res$sdev^2)
-  d <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], annot = de2@colData[[conti.annot]])
+  d <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], annot = de2@colData[[conti.annot]], check.names = FALSE)
   colnames(d)[3] <- conti.annot
-  ggp <- ggplot(data = d, aes_string(x = "PC1", y = "PC2", color = conti.annot)) + 
-          geom_point(size = 3) + xlab(paste0("PC1", round(percentVar[1] * 
-          100), "% variance")) + ylab(paste0("PC2: ", round(percentVar[2] * 
-          100), "% variance")) + coord_fixed() + ggtitle(label = conti.annot)
+  ggp <- ggplot2::ggplot(data = d, ggplot2::aes_string(x = "PC1", y = "PC2", color = conti.annot)) + 
+          ggplot2::geom_point(size = 3) + ggplot2::xlab(paste0("PC1", round(percentVar[1] * 
+          100), "% variance")) + ggplot2::ylab(paste0("PC2: ", round(percentVar[2] * 
+          100), "% variance")) + ggplot2::coord_fixed() + ggplot2::ggtitle(label = conti.annot)
   svg(filename = paste0(pca_dir, '/PCA_', conti.annot, '.svg'), width = 1600/96, height = 1200/96)
   print(ggp)
   svg_off()
@@ -399,7 +400,7 @@ if (!all(is.null(c(covar_factor_names, covar_conti_names)))) {
   for (bc in names(box_categ)) {
     suppressWarnings(de2.pca.batch <- DESeq2::plotPCA(de2.norm.reg, intgroup = box_categ[[bc]], ntop = topvar))
     svg(filename = paste0(pcareg_dir, '/PCA_', box_categ[[bc]], '_regressed.svg'), width = 1600/96, height = 1200/96)
-    suppressWarnings(print(de2.pca.batch + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = de2.pca.batch$data$PC1, split = de2.pca.batch$data$group), PC2 = get_medoid(x = de2.pca.batch$data$PC2, split = de2.pca.batch$data$group), group = levels(de2.pca.batch$data$group)), shape = 13, size = 8) + ggplot2::labs(title = bc)))
+    suppressWarnings(print(de2.pca.batch + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = de2.pca.batch$data$PC1, split = de2.pca.batch$data$group), PC2 = get_medoid(x = de2.pca.batch$data$PC2, split = de2.pca.batch$data$group), group = levels(de2.pca.batch$data$group), check.names = FALSE), shape = 13, size = 8) + ggplot2::labs(title = bc)))
     svg_off()
   }
   rm(de2.norm.reg)
@@ -409,12 +410,12 @@ if (!all(is.null(c(covar_factor_names, covar_conti_names)))) {
   for (conti.annot in unlist(conti_categ)) {
     pca_res <- prcomp(t(supervised_mat[rv_selec,]))
     percentVar <- pca_res$sdev^2/sum(pca_res$sdev^2)
-    d <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], annot = de2@colData[[conti.annot]])
+    d <- data.frame(PC1 = pca_res$x[, 1], PC2 = pca_res$x[, 2], annot = de2@colData[[conti.annot]], check.names = FALSE)
     colnames(d)[3] <- conti.annot
-    ggp <- ggplot(data = d, aes_string(x = "PC1", y = "PC2", color = conti.annot)) + 
-            geom_point(size = 3) + xlab(paste0("PC1", round(percentVar[1] * 
-            100), "% variance")) + ylab(paste0("PC2: ", round(percentVar[2] * 
-            100), "% variance")) + coord_fixed() + ggtitle(label = conti.annot)
+    ggp <- ggplot2::ggplot(data = d, ggplot2::aes_string(x = "PC1", y = "PC2", color = conti.annot)) + 
+            ggplot2::geom_point(size = 3) + ggplot2::xlab(paste0("PC1", round(percentVar[1] * 
+            100), "% variance")) + ggplot2::ylab(paste0("PC2: ", round(percentVar[2] * 
+            100), "% variance")) + ggplot2::coord_fixed() + ggplot2::ggtitle(label = conti.annot)
     svg(filename = paste0(pcareg_dir, '/PCA_', conti.annot, '_regressed.svg'), width = 1600/96, height = 1200/96)
     print(ggp)
     svg_off()
@@ -781,7 +782,7 @@ assess_covar(mat = SummarizedExperiment::assay(de2.temp.norm), annot.df = de2.te
 
 ```
 
-*NOTE* : DEA generates numerous tables, data archives and plots (thousands), thus results are not available in this report.
+*NOTE* : DEA (especially with GSEO/ORA turned on) generates numerous tables, data archives and plots (thousands), thus results are not available in this report.
 
 Additional GSEA for selected WP and KEGG terms
 
@@ -798,7 +799,7 @@ wp_gmt <- clusterProfiler::read.gmt(gmtfile = wp_gmt_file)
 ### Restrict to the requested ones
 w_ids <- unname(vapply(as.character(wp_gmt$term), function(x) { unlist(strsplit(x = x, split = '\\%'))[3] }, 'a'))
 w_comx <- w_ids %in% sort(unique(wp_list))
-gmt_selec_list[['WP_selec']] <- data.frame(term = as.factor(w_ids[w_comx]), gene = wp_gmt$gene[w_comx], stringsAsFactors = FALSE)
+gmt_selec_list[['WP_selec']] <- data.frame(term = as.factor(w_ids[w_comx]), gene = wp_gmt$gene[w_comx], stringsAsFactors = FALSE, check.names = FALSE)
 rm(wp_gmt, w_ids, w_comx)
 
 ## KEGG selection
@@ -809,7 +810,7 @@ kegg_gmt <- clusterProfiler::read.gmt(gmtfile = kegg_gmt_file)
 ### Restrict to the requested ones
 k_ids <- vapply(as.character(kegg_gmt$term), function(x) { sub(pattern = 'hsa', replacement = '', x = unlist(strsplit(x = x, split = '_'))[1]) }, 'a')
 k_comx <- k_ids %in% sort(unique(paste0('0', kegg_list)))
-gmt_selec_list[['KEGG_selec']] <- data.frame(term = as.factor(k_ids[k_comx]), gene = kegg_gmt$gene[k_comx], stringsAsFactors = FALSE)
+gmt_selec_list[['KEGG_selec']] <- data.frame(term = as.factor(k_ids[k_comx]), gene = kegg_gmt$gene[k_comx], stringsAsFactors = FALSE, check.names = FALSE)
 rm(kegg_gmt, k_ids, k_comx)
 
 ## Looping on DEA results
@@ -915,7 +916,7 @@ if (!is.null(salmon_pipeline_tpm_file)) {
   exp_deconv_mat <- exp_deconv_mat[!duplicated(rownames(exp_deconv_mat)),]
   
   ### Write the cibersortx-formatted table
-  write.table(x = data.frame(Symbol = rownames(exp_deconv_mat), exp_deconv_mat), file = paste0(id_dir, '/CIBERSORTx_TPM_', deconv_suffix, '.tsv'), sep = '\t', quote = FALSE, row.names = FALSE)
+  data.table::fwrite(x = data.frame(Symbol = rownames(exp_deconv_mat), exp_deconv_mat, check.names = FALSE), file = paste0(id_dir, '/CIBERSORTx_TPM_', deconv_suffix, '.tsv'), sep = '\t', quote = FALSE, row.names = FALSE)
   
   ## Set options for immunedeconv_run
   to_tpm <- FALSE
@@ -958,7 +959,7 @@ if (!is.null(salmon_pipeline_tpm_file)) {
   rm(x)
   
   ### Export
-  write.table(x = data.frame(Symbol = rownames(exp_deconv_mat), exp_deconv_mat), file = paste0(id_dir, '/', paste(c('CIBERSORTx', 'TPM', supervised_word), collapse = '_'), '.tsv'), sep = '\t', quote = FALSE, row.names = FALSE)
+  data.table::fwrite(x = data.frame(Symbol = rownames(exp_deconv_mat), exp_deconv_mat, check.names = FALSE), file = paste0(id_dir, '/', paste(c('CIBERSORTx', 'TPM', supervised_word), collapse = '_'), '.tsv'), sep = '\t', quote = FALSE, row.names = FALSE)
   
   ## Set options for immunedeconv_run
   to_tpm <- FALSE
@@ -1047,9 +1048,9 @@ kw_all <- lapply(prop_factors, function(ppf) {
     kw_l <- sapply(seq_len(nrow(id_res_all[[idn]])), function(x) {
       # message(x)
       ## Perform KW test
-      data_df <- data.frame(props = unname(unlist(id_res_all[[idn]][x,-1])), class = de2.norm@colData[[ppf]])
+      data_df <- data.frame(props = unname(unlist(id_res_all[[idn]][x,-1])), class = de2.norm@colData[[ppf]], check.names = FALSE)
       kw_t <- kruskal.test(props ~ class, data = data_df)
-      k_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0)
+      k_df <- data.frame(Statistic = kw_t$statistic, raw.p = kw_t$p.value, adj.p = 0.0, check.names = FALSE)
       ## Add classes median
       ksumry <- aggregate(props ~ class, data = data_df, summary)
       ksd <- aggregate(props ~ class, data = data_df, sd)
@@ -1061,7 +1062,7 @@ kw_all <- lapply(prop_factors, function(ppf) {
       return(k_df)
     }, simplify = FALSE)
     
-    kw_res <- data.frame(Cell_type = paste0(idn, '_', unlist(id_res_all[[idn]][,1])), Reduce(f = rbind, x = kw_l))
+    kw_res <- data.frame(Cell_type = paste0(idn, '_', unlist(id_res_all[[idn]][,1])), Reduce(f = rbind, x = kw_l), check.names = FALSE)
     kw_res$adj.p <- p.adjust(p = kw_res$raw.p, method = "BH")
     rownames(kw_res) <- paste0(idn, '_', gsub(pattern = "\\W", replacement = '.', x = kw_res$Cell_type))
     return(kw_res)
@@ -1079,7 +1080,7 @@ for (k in seq_along(kw_all)) colnames(kw_all[[k]])[1] <- paste0(colnames(kw_all[
 
 
 kw_out <- kw_all
-kw_out$Legend <- data.frame(Sheet_name = seq_along(kw_all), Cohort = names(kw_all))
+kw_out$Legend <- data.frame(Sheet_name = seq_along(kw_all), Cohort = names(kw_all), check.names = FALSE)
 kw_out <- kw_out[c(which(names(kw_out) == 'Legend'), which(names(kw_out) != 'Legend'))]
 names(kw_out) <- c('Legend', seq_along(kw_all))
 WriteXLS::WriteXLS(x = kw_out, ExcelFileName = paste0(id_dir, '/immunedeconv_prop_test_results.xlsx'), AdjWidth = TRUE, AutoFilter = TRUE, BoldHeaderRow = TRUE, FreezeRow = 1, FreezeCol = 1, na = NA)
@@ -1211,7 +1212,7 @@ rc_res <- Hmisc::rcorr(x = as.matrix(annot_df[, colnames(annot_df) %in% qconti_v
 rc_cor <- rc_res$r[rownames(rc_res$r) %in% tconti_vec, colnames(rc_res$r) %in% qconti_vec]
 rc_rawp <- rc_res$P[rownames(rc_res$r) %in% tconti_vec, colnames(rc_res$r) %in% qconti_vec]
 rc_adjp <- matrix(p.adjust(p = rc_rawp, method = 'BH'), nrow = nrow(rc_rawp), ncol = ncol(rc_rawp), byrow = TRUE, dimnames = dimnames(rc_rawp))
-WriteXLS::WriteXLS(x = list(Spearman = data.frame(Spearman = rownames(rc_cor), rc_cor), AdjP = data.frame(AdjP = rownames(rc_adjp), rc_adjp)), ExcelFileName = paste0(qcont_tcont_dir, '/', cor_method, '_correlation.xlsx'), AdjWidth = TRUE, BoldHeaderRow = TRUE)
+WriteXLS::WriteXLS(x = list(Spearman = data.frame(Spearman = rownames(rc_cor), rc_cor, check.names = FALSE), AdjP = data.frame(AdjP = rownames(rc_adjp), rc_adjp), check.names = FALSE), ExcelFileName = paste0(qcont_tcont_dir, '/', cor_method, '_correlation.xlsx'), AdjWidth = TRUE, BoldHeaderRow = TRUE)
 
 ### Compute correlation
 for (atc in annot.to.cor) {
@@ -1248,8 +1249,7 @@ time_data <- de2.norm@colData$OS_m
 event_data <- as.numeric(de2.norm@colData$OS_event) ## Check that death positive ends as 2
 os_g_res <- lapply(rownames(supervised_mat), function(myg) {
   ### Create temp df
-  # assoc_df <- data.frame(time = time_data, status = event_data, gexp = SummarizedExperiment::assay(de2.norm)[myg,])
-  assoc_df <- data.frame(time = time_data, status = event_data, gexp = supervised_mat[myg,])
+  assoc_df <- data.frame(time = time_data, status = event_data, gexp = supervised_mat[myg,], check.names = FALSE)
   ### Cox model
   surv_model <- survival::coxph(formula = survival::Surv(time = time, event = status) ~ gexp, data = assoc_df)
   ### Summary to get the p-value
@@ -1257,7 +1257,7 @@ os_g_res <- lapply(rownames(supervised_mat), function(myg) {
   return(c(surv_model$coefficients, surv_model$score, sm_smry$sctest[3]))
 })
 ### Summarize in a df
-os_g_df <- data.frame(Gene = rownames(supervised_mat), Reduce(f = rbind, x = os_g_res))
+os_g_df <- data.frame(Gene = rownames(supervised_mat), Reduce(f = rbind, x = os_g_res), check.names = FALSE)
 rm(os_g_res)
 colnames(os_g_df) <- c('Gene', 'Coefficient', 'Score', 'Raw.p')
 os_g_df$Adj.p <- p.adjust(p = os_g_df$Raw.p, method = 'BH')
@@ -1286,7 +1286,7 @@ time_data <- de2.norm@colData$PFS_m
 event_data <- as.numeric(de2.norm@colData$Progression) ## Check that progression positive ends as 2
 pfs_g_res <- lapply(rownames(supervised_mat), function(myg) {
   ### Create temp df
-  assoc_df <- data.frame(time = time_data, status = event_data, gexp = supervised_mat[myg,])
+  assoc_df <- data.frame(time = time_data, status = event_data, gexp = supervised_mat[myg,], check.names = FALSE)
   ### Cox model
   surv_model <- survival::coxph(formula = survival::Surv(time = time, event = status) ~ gexp, data = assoc_df)
   ### Summary to get the p-value
@@ -1294,7 +1294,7 @@ pfs_g_res <- lapply(rownames(supervised_mat), function(myg) {
   return(c(surv_model$coefficients, surv_model$score, sm_smry$sctest[3]))
 })
 ### Summarize in a df
-pfs_g_df <- data.frame(Gene = rownames(supervised_mat), Reduce(f = rbind, x = pfs_g_res))
+pfs_g_df <- data.frame(Gene = rownames(supervised_mat), Reduce(f = rbind, x = pfs_g_res), check.names = FALSE)
 colnames(pfs_g_df) <- c('Gene', 'Coefficient', 'Score', 'Raw.p')
 pfs_g_df$Adj.p <- p.adjust(p = pfs_g_df$Raw.p, method = 'BH')
 pfs_g_df <- pfs_g_df[order(pfs_g_df$Score, decreasing = TRUE),]

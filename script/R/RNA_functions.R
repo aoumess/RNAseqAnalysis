@@ -1011,7 +1011,6 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
   if (any(custom.do) & is.null(custom_gmt_list)) stop('GSEA/ORA on custom bank is requested, but no bank list (custom_gmt_list) provided !')
   if (!is.null(custom_gmt_list) & !is.list(custom_gmt_list)) stop('custom_gmt_list should be a named list of terms/genes data.frames as obtained from the clusterProfiler::read.gmt() function !')
   ## Feature filtering
-  if(!is.integer(min_count)) stop('min_count should be a positive integer !')
   if(min_count < 0) stop('min_count should be a positive integer !')
   if(!is.logical(per_class)) stop('per_class should be a logical !')
   
