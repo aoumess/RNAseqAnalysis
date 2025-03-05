@@ -357,7 +357,7 @@ gsea_merge_dotplot <- function(gsea_res_list = NULL, title = "DotPlot", intersec
     ggplot2::ylab(NULL) +
     ggplot2::ggtitle(title) + 
     ggplot2::facet_grid(cols = ggplot2::vars(Cluster, sign)) +
-    ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width=40)) + 
+    ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width = 40, whitespace_only = FALSE)) + 
     ggplot2::scale_x_continuous(breaks = seq(0, 1, .5), limits = c(0,1))
   if(plot) print(cdp)
   if(return_object) return(cdp)
@@ -1929,8 +1929,6 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
               svg(filename = pf, width = pw/96, height = ph/96)
               ComplexHeatmap::draw(myHM)
               svg_off()
-              # dev.off()
-              # svg_convert(svg_files = pf, format = 'png', height = ph)
             }
           }
         }
@@ -2940,8 +2938,6 @@ gsea_output <- function(gseaResult = NULL, comp.name = 'TEST', out.dir = getwd()
       svg(filename = pf, width = pw/96, height = ph/96)
       print(hp)
       svg_off()
-      # dev.off()
-      # svg_convert(svg_files = pf, format = 'png', height = ph)
     }
     
     ## Dotplot // Barplot
@@ -2953,15 +2949,13 @@ gsea_output <- function(gseaResult = NULL, comp.name = 'TEST', out.dir = getwd()
       plot.function <- base::get(func.split[2], envir = loadNamespace(func.split[1]))
       gseaBak <- gseaResult
       gseaResult@result$Description <- gsub(pattern = '_', ' ', gseaResult@result$Description, fixed = TRUE)
-      suppressMessages(p <- plot.function(gseaResult, showCategory = unname(complot[cx]), title = paste(c(comp.name, gseaResult@setType, 'GSEA'), collapse = "\n"), split = '.sign') + ggplot2::facet_grid(~ .sign) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width=100)))
+      suppressMessages(p <- plot.function(gseaResult, showCategory = unname(complot[cx]), title = paste(c(comp.name, gseaResult@setType, 'GSEA'), collapse = "\n"), split = '.sign') + ggplot2::facet_grid(~ .sign) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width = 70, whitespace_only = FALSE)))
       pf <- paste0(gsea.dir, '/GSEA.', func.split[2], '.svg')
       pw <- 1000
       ph <- ((min(length(which(gsea.sig.tf)), unname(complot[cx])) * 20) + 300)
       svg(filename = pf, width = pw/96, height = ph/96)
       print(p)
       svg_off()
-      # dev.off()
-      # svg_convert(svg_files = pf, format = 'png', height = ph)
       gseaResult <- gseaBak
       rm(gseaBak)
     }
@@ -2977,10 +2971,8 @@ gsea_output <- function(gseaResult = NULL, comp.name = 'TEST', out.dir = getwd()
         ph <- ((min(length(which(gsea.sig.tf)), ridgeplot) * 20) + 300)
         pw <- 1000
         svg(filename = pf, width = pw/96, height = ph/96)
-        suppressMessages(print(rip + ggplot2::ggtitle(paste(c(comp.name, gseaResult@setType, 'GSEA'), collapse = "\n")) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width=100))))
+        suppressMessages(print(rip + ggplot2::ggtitle(paste(c(comp.name, gseaResult@setType, 'GSEA'), collapse = "\n")) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width = 100, whitespace_only = FALSE))))
         svg_off()
-        # dev.off()
-        # svg_convert(svg_files = pf, format = 'png', height = ph)
         gseaResult <- gseaBak
         rm(gseaBak)
       }
@@ -3039,8 +3031,6 @@ gsea_output <- function(gseaResult = NULL, comp.name = 'TEST', out.dir = getwd()
         svg(filename = pf, width = pw/96, height = ph/96)
         try(print(p + ggplot2::scale_fill_continuous(guide = ggplot2::guide_legend()) + ggplot2::theme(legend.position="bottom")), silent = TRUE)
         svg_off()
-        # dev.off()
-        # svg_convert(svg_files = pf, format = 'png', height = ph)
       } else message(paste0('Error captured for cnetplot : \n"', p, '"'))
     }
     if (!is.null(emapplot) & length(which(gsea.sig.tf)) > 1) {
@@ -3053,8 +3043,6 @@ gsea_output <- function(gseaResult = NULL, comp.name = 'TEST', out.dir = getwd()
         svg(filename = pf, width = pw/96, height = ph/96)
         try(print(p + ggplot2::scale_fill_continuous(guide = ggplot2::guide_legend()) + ggplot2::theme(legend.position="bottom")), silent = TRUE)
         svg_off()
-        # dev.off()
-        # svg_convert(svg_files = pf, format = 'png', height = ph)
       } else message(paste0('Error captured for emapplot : \n"', p, '"'))
     }
   } else message("No enriched term found.")
@@ -3189,8 +3177,6 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
       svg(filename = pf, width = pw/96, height = ph/96)
       print(hp)
       svg_off()
-      # dev.off()
-      # svg_convert(svg_files = pf, format = 'png', height = ph)
     }
     
     ## Dotplot // Barplot
@@ -3206,10 +3192,8 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
       pw <- 1000
       ph <- ((min(length(which(ora.sig.tf)), unname(complot[cx])) * 20) + 300)
       svg(filename = pf, width = pw/96, height = ph/96)
-      print(plot.function(enrichResult, showCategory = unname(complot[cx]), title = paste(c(comp.name, enrichResult@ontology, 'ORA'), collapse = "\n")) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width=100)))
+      print(plot.function(enrichResult, showCategory = unname(complot[cx]), title = paste(c(comp.name, enrichResult@ontology, 'ORA'), collapse = "\n")) + ggplot2::scale_y_discrete(labels=function(x) stringr::str_wrap(x, width = 70, whitespace_only = FALSE)))
       svg_off()
-      # dev.off()
-      # svg_convert(svg_files = pf, format = 'png', height = ph)
       enrichResult <- enrichResult_bak
       rm(enrichResult_bak)
     }
@@ -3227,14 +3211,8 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
         cur.geneList <- geneList[enrichResult@gene2Symbol]
         pf <- paste0(kegg.dir, '/', k_id, '.pathview.png')
         ptry <- try(suppressMessages(suppressWarnings(pathview::pathview(gene.data = cur.geneList, pathway.id = k_id, species = kegg.sp, limit = list(gene=lfc.min, cpd=1), low=list(gene = "red", cpr = "cornflowerblue"), mid = list(gene = "grey90", cpd = "grey90"), high = list(gene = "blue", cpd = "yellow"), kegg.dir = kegg.dir))), silent = TRUE)
-        # if(!is(ptry, class2 = 'try-error')) {
-        #   # svg_convert(svg_files = pf, format = 'png', height = 1100)
-        # }
         torem <- paste0(kegg.dir, '/', k_id, '.', c('png', 'xml'))
-        # torem <- paste0(kegg.dir, '/', k_id, '.', c('xml'))
         for (x in torem) { if (file.exists(x)) file.remove(x) }
-        # if (file.exists(paste0(k_id, '.pathview.png'))) file.rename(from = paste0(k_id, '.pathview.png'), to = pf)
-        
       }
       setwd(ori.dir)
     }
@@ -3249,8 +3227,6 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
         svg(filename = pf, width = pw/96, height = ph/96)
         try(print(p + ggplot2::scale_fill_continuous(guide = ggplot2::guide_legend()) + ggplot2::theme(legend.position="bottom")), silent = TRUE)
         svg_off()
-        # dev.off()
-        # svg_convert(svg_files = pf, format = 'png', height = ph)
       } else message(paste0('Error captured for cnetplot : \n"', p, '"'))
     }
     if (!is.null(emapplot)  & length(which(ora.sig.tf)) > 1) {
@@ -3263,8 +3239,6 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
         svg(filename = pf, width = pw/96, height = ph/96)
         try(print(p + ggplot2::scale_fill_continuous(guide = ggplot2::guide_legend()) + ggplot2::theme(legend.position="bottom")), silent = TRUE) ## Can sometimes raise an error...
         svg_off()
-        # dev.off()
-        # svg_convert(svg_files = pf, format = 'png', height = ph)
       } else message(paste0('Error captured for emapplot : \n"', p, '"'))
       
     }
