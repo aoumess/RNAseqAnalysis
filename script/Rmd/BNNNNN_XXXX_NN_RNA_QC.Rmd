@@ -79,7 +79,8 @@ box_categ <- list(
 ## BASIC PARAMETERS
 
 ### ANNOTATION : sample names column
-annot_sn <- 'Sample_id'
+# annot_sn <- 'Sample_id' ## Salmon pipeline
+annot_sn <- 'SegmentDisplayName' ## GeoMX
 ### Number of max different distant colors to generate in the RGB space, for boxplots/PCAs (should cover all possible classes in any of the requested annotation)
 ncolors <- 20
 ### Fixing seed
@@ -92,17 +93,18 @@ sparse_max <- .6
 min_totcount <- 5
 ### DESeq2 normalization method (only VST supported yet)
 norm_method <- 'vst'
+### Top variant genes to use for PCA
+# topvar <- 200   # For panel > 200 genes
+topvar <- 500   # For whole transcriptome
 
 ## Flags to use to discard outlying samples
 flags_to_use <- c(
   'OL_sparsity'
-  ,
-  'OL_AQM_RAW_heatmap'
-  ,
-  'OL_AQM_RAW_boxplot'
-  ,
-  'OL_AQM_NORM_heatmap'
-  )
+  # ,
+  # 'OL_AQM_NORM_boxplot'
+  # ,
+  # 'OL_AQM_NORM_heatmap'
+)
 
 ```
 
@@ -120,7 +122,7 @@ for (ssc in source_script) {
 ```{r setup_set, message = FALSE}
 ## Clean annotations colname variables
 box_categ <- lapply(box_categ, function(x) gsub(pattern = "\\W", replacement = '.', x = x))
-flags_to_use <- lapply(flags_to_use, function(x) gsub(pattern = "\\W", replacement = '.', x = x))
+flags_to_use <- gsub(pattern = "\\W", replacement = '.', x = flags_to_use)
 
 ### Results output dir
 out_dir <- paste0(root_dir, '/RESULTS')
@@ -372,7 +374,7 @@ saveRDS(de2.norm, file = paste0(work_dir, '/DESeq2Obj_Norm.', tolower(norm_metho
 
 ## Array Quality Metrics
 
-```{r aqm_raw}
+```{r aqm_norm}
 temp_eset <- Biobase::ExpressionSet(assayData = SummarizedExperiment::assay(de2.norm), annotation = input_type, phenoData = new("AnnotatedDataFrame",data = as.data.frame(de2.norm@colData)))
 ## Running AQM
 suppressWarnings(aqm_NORM <- arrayQualityMetrics::arrayQualityMetrics(expressionset = temp_eset, outdir = paste0(work_dir, '/AQM_NORM'), do.logtransform = FALSE, intgroup = unname(unlist(box_categ)), force = TRUE))
@@ -450,10 +452,8 @@ all(flags_to_use %in% colnames(de2.norm@colData))
 samples_keep <- unname(matrixStats::rowCounts(x = as.matrix(de2.norm@colData[,flags_to_use]), value = 2) == 0)
 if(length(samples_keep) > 0) {
   de2.norm$QC_sample_kept <- as.factor(samples_keep)
-  
-  ## Discarded sample(s)
-  colnames(de2.norm)[!samples_keep]
 }
+if(!all(samples_keep)) colnames(de2.norm)[!samples_keep]
 
 ```
 

@@ -51,7 +51,8 @@ annot_filename <- "/home/job/WORKSPACE/PROJECTS/B25007_ELEL_01_RT156.24_TRICS_RN
 analysis_name <- 'Exploratory_analysis_Normalized.for.Liver_type'
 
 ### ANNOTATION : sample names column
-annot_sn <- 'Sample_id'
+annot_sn <- 'Sample_id' ## Salmon pipeline
+# annot_sn <- 'SegmentDisplayName' ## GeoMX
 
 ## OTHER PARAMETERS
 
@@ -286,7 +287,7 @@ norm_method
 de2 <- DESeq2::estimateSizeFactors(object = de2)
 ## Save RAW exp
 saveRDS(de2, file = paste0(work_dir, '/DESeq2Obj_Raw.RDS'), compress = 'bzip2')
-write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2)), SummarizedExperiment::assay(de2), check.names = FALSE), file = gzfile(paste0(work_dir, '/Raw_counts_', ncol(SummarizedExperiment::assay(de2)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
+data.table::fwrite(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2)), SummarizedExperiment::assay(de2), check.names = FALSE), file = paste0(work_dir, '/Raw_counts_', ncol(SummarizedExperiment::assay(de2)), 's.tsv.gz'), sep = '\t', quote = FALSE, row.names = FALSE, compress = 'gzip', compressLevel = 9)
 ## Normalization
 if (tolower(norm_method) == 'vst') {
   message('Normalizing using vst ...')
@@ -297,7 +298,7 @@ if (tolower(norm_method) == 'vst') {
 }
 ## Save Normalized
 saveRDS(de2.norm, file = paste0(work_dir, '/DESeq2Obj_Norm.', tolower(norm_method), '.RDS'), compress = 'bzip2')
-write.table(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2.norm)), SummarizedExperiment::assay(de2.norm), check.names = FALSE), file = gzfile(paste0(work_dir, '/Normalized.', norm_method, '_counts_', ncol(SummarizedExperiment::assay(de2.norm)), 's.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
+data.table::fwrite(x = data.frame(Feature = rownames(SummarizedExperiment::assay(de2.norm)), SummarizedExperiment::assay(de2.norm), check.names = FALSE), file = paste0(work_dir, '/Normalized.', norm_method, '_counts_', ncol(SummarizedExperiment::assay(de2.norm)), 's.tsv.gz'), sep = '\t', quote = FALSE, row.names = FALSE, compress = 'gzip', compressLevel = 9)
 conti_categ <- unique(c(conti_categ, 'sizeFactor'))
 
 ```
@@ -696,12 +697,10 @@ assess_covar(mat = SummarizedExperiment::assay(de2.temp.norm), annot.df = de2.te
     design.df = my_des
     , 
     ## Factors to evaluate as putative categorical covariates
-    # assess.factor = unname(unlist(box_categ))
-    assess.factor = NULL
+    assess.factor = if(all(is.null(unlist(covariates)))) unname(unlist(box_categ)) else NULL
     , 
     ## Numerics to evaluate as putative continuous covariates
-    # assess.conti = unname(unlist(conti_categ))
-    assess.conti = NULL
+    assess.conti = if(all(is.null(unlist(covariates)))) unname(unlist(conti_categ)) else NULL
     , 
     ## Number of features to use for VST modelization and PCA
     vst_nsub = topvar

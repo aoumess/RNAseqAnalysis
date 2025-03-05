@@ -24,8 +24,8 @@ git clone https://github.com/aoumess/RNAseqAnalysis "${ROOT_DIR}/RNAseqAnalysis"
 ## Activate the environment
 "${ENVTOOL}" activate "${INSTALL_ENV_PREFIX}"
 
-## Install glmmSeq  & kmndirs packages (from github)
-R --no-environ -e '.libPaths(new = "${INSTALL_ENV_PREFIX}/lib/R/library", include.site = FALSE) ; remotes::install_github("myles-lewis/glmmSeq@v0.5.5") ; remotes::install_github(repo = "r-forge/kmndirs", subdir = "pkg/kmndirs", tag = "94883aa")'
+## Install / update glmmSeq  & kmndirs packages (from github)
+R --no-environ -e '.libPaths(new = "${INSTALL_ENV_PREFIX}/lib/R/library", include.site = FALSE) ; remotes::install_github("myles-lewis/glmmSeq@v0.5.5") ; remotes::install_github(repo = "r-forge/kmndirs", subdir = "pkg/kmndirs", tag = "94883aa") ; remotes::install_github("renozao/NMF", tag = "0.30.4.900", ref = "devel", force = TRUE)'
 
 ## Done ! One can use the included Rstudio and open the desired RMD (QC, then Analysis)
 rstudio &
