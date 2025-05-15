@@ -3248,6 +3248,187 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
   
 }
 
+
+## Breast cancer subtype prediction (PAM50) from gene expression ====
+### . pam_method = Type of PAM50 computation, from genefu ("pam50" : original method ; "pam50.robust" : genfu 'robust' method ; "pam50.scale' : genefu 'scale' method)
+### . calibration = Type of calibration to perform using the "original" implementation (NA = automatic centering ; -1  = no calibration ; a symbol-named vector of values = the calibration values for each gene)
+pam50_pred <- function(exp_mat = NULL, pam_method = "pam50", calibration = -1, plot = TRUE, samp_dist = "spearman", samp_agg = "ward.D", feat_dist = "spearman", feat_agg = "ward.D", center = FALSE, scale = FALSE, return_data = FALSE, out_dir = getwd(), my_seed = 1L) {
+  ## Checks
+  if (is.null(exp.mat)) stop('An expression matrix is required !')
+  if (!is.matrix(exp.mat)) stop('"exp_mat" is not a matrix !')
+  ok_methods <- c('pam50', 'pam50.robust', 'pam50.scale')
+  if (!tolower(pam_method) %in% ok_methods) stop('"pam_method" not recognized ! Should be one of "', paste(ok_methods, collapse = '", "'), '"')
+  if (!dir.exists(out_dir)) stop('Output directory [', out_dir, '] does not exist !')
+  
+  ### Reorder exp_mat
+  exp_mat <- exp_mat[order(rownames(exp_mat)), order(colnames(exp_mat))]
+  
+  ## RUN
+  
+  ### Calibration ?
+  exp_calib <- exp_mat
+  if (is.na(calibration)) {
+    exp_calib <- genefu::medianCtr(exp_calib)
+  } else if(any(calibration != -1)) {
+    calibration <- calibration[order(names(calibration))]
+    exp.in.calib <- which(rownames(exp_calib) %in% names(calibration))
+    calib.in.exp <- which(names(calibration) %in% rownames(exp_calib))
+    if (length(exp.in.calib) == 0) stop('Calibration data and "exp_mat" have no common symbol !')
+    exp_calib <- exp_calib[exp.in.calib,]
+    calibration <- calibration[calib.in.exp]
+    if(length(exp.in.calib) < nrow(exp_calib)) message('Reduced the expression from ', length(exp_calib), ' to ', length(exp.in.calib), ' due to calibration...')
+    exp_calib <- exp_calib - calib
+  }
+  
+  ### Scores
+  erScore<-as.vector(t(exp_calib["ESR1",]))
+  her2Score<-as.vector(t(exp_calib["ERBB2",]))
+  prolifScore <- apply(exp_calib[rownames(exp_calib) %in% c("CCNB1","UBE2C","BIRC5","KNTC2","CDC20","PTTG1","RRM2","MKI67","TYMS","CEP55","CDCA1"),], 2, mean, na.rm = TRUE)
+  
+  ### MODEL SELECTION
+  data(list = pam_method, package = 'genefu')
+  
+  ### Check common symbols
+  clen <- length(which(rownames(exp_calib) %in% rownames(get(pam_method)$centroids)))
+  if (clen == 0) stop('No common symbols in "exp_mat" and the model centroids ! (Does your "exp_mat" really contain gene symbols as rownames ?)') else message('. Found ', clen, ' common genes with model centroids ...')
+  
+  ### Predict
+  pam50_pred <- genefu::intrinsic.cluster.predict(sbt.model = get(pam_method), data = t(exp_calib), annot = data.frame(Gene.Symbol = rownames(exp_calib)), do.mapping = FALSE, do.prediction.strength = TRUE)
+  table(pam50_pred$subtype)/ncol(exp_calib)
+  
+  ### Compute confidence
+  call.conf <- vapply(X = seq_along(pam50_pred$subtype), FUN = function(x) { 1 - cor.test(x = exp_calib[rownames(exp_calib) %in% rownames(pam50$centroids), x, drop =  TRUE], y = pam50$centroids[rownames(pam50$centroids) %in% rownames(exp_calib), which(colnames(pam50$centroids) == pam50_pred$subtype[x]), drop = TRUE], method = 'spearman', exact = FALSE)$p.value }, FUN.VALUE = .1)
+  
+  ### Compute risk scores
+  genomic <- 0.04210193 * pam50_pred$cor[,1] + 0.12466938 * pam50_pred$cor[,2] + -0.35235561 * pam50_pred$cor[,3] + 0.14213283 * pam50_pred$cor[,4]
+  genomicWprolif <- -0.0009299747 * pam50_pred$cor[,1] + 0.0692289192 * pam50_pred$cor[,2] + -0.0951505484 * pam50_pred$cor[,3] +  0.0493487685 * pam50_pred$cor[,4] + 0.3385116381 * prolifScore
+  #### Thresholding
+  glthreshold <- -0.15
+  ghthreshold <-  0.1
+  gplthreshold <- -0.25
+  gphthreshold <-  0.1
+  clthreshold <- -0.1
+  chthreshold <-  0.2
+  cplthreshold <- -0.2
+  cphthreshold <-  0.2
+  griskgroups <- genomic
+  griskgroups[genomic > ghthreshold] <- "high"
+  griskgroups[genomic > glthreshold & genomic < ghthreshold] <- "med"
+  griskgroups[genomic < glthreshold] <- "low"
+  gpriskgroups <- genomicWprolif
+  gpriskgroups[genomicWprolif > gphthreshold] <- "high"
+  gpriskgroups[genomicWprolif > gplthreshold & genomicWprolif < gphthreshold] <- "med"
+  gpriskgroups[genomicWprolif < gplthreshold] <- "low"
+  genomic <- 100 * (genomic + 0.35 ) / 0.85
+  genomicWprolif <- 100 * (genomicWprolif + 0.35 ) / 0.85
+  
+  ### Build output table
+  out_df <- data.frame(pam50_pred$subtype, call.conf, pam50_pred$prediction.strength$ps.individual, pam50_pred$cor, pam50_pred$subtype.proba, genomic, griskgroups, genomicWprolif, gpriskgroups, erScore, her2Score, prolifScore)
+  colnames(out_df) <- c("Predicted_subtype", "Prediction_confidence", "Prediction_strengh", "Cor.Basal", "Cor.Her2", "Cor.LumA", "Cor.LumB", "Cor.Normal", "Proba.Basal", "Proba.Her2", "Proba.LumA", "Proba.LumB", "Proba.Normal", "ROR-S (Subtype Only)", "ROR-S Group (Subtype Only)", "ROR-P (Subtype + Proliferation)", "ROR-P Group (Subtype + Proliferation)", "ER_score", "Her2_score", "Proliferation_score")
+  
+  ### Write output table
+  data.table::fwrite(x = out_df, file = paste0(out_dir, '/', pam_method, '_prediction.tsv'), sep = "\t")
+  
+  ### Return data ?
+  if(return_data) return(out_df)
+  
+  ### Plot ?
+  if (plot) {
+    
+    ### EXP PLOT
+    if (center) exp_calib <- exp_calib - rowMeans(exp_calib, na.rm = TRUE)
+    if (scale) exp_calib <- exp_calib / matrixStats::rowSds(exp_calib, na.rm = TRUE)
+    
+    z.mat <- (exp_calib - rowMeans(exp_calib, na.rm = TRUE)) / matrixStats::rowSds(exp_calib, na.rm = TRUE)
+    
+    heatmap.palette = c("royalblue3", "ivory", "orangered3")
+    myRamp <- circlize::colorRamp2(c(-1, 0, 1), heatmap.palette)
+    
+    ## Clustering samples
+    hc.s <- hclust(amap::Dist(x = t(exp_calib), method = samp_dist), method = samp_agg)
+    ## Clustering genes
+    hc.g <- hclust(amap::Dist(x = exp_mat, method = feat_dist), method = feat_agg)
+    ## Samples annotation
+    set.seed(my_seed)
+    ha1 = ComplexHeatmap::HeatmapAnnotation(df = data.frame(
+      "PAM50 pred" = out_df$Predicted_subtype
+      ,
+      "Confidence" = out_df$Prediction_confidence
+      ,
+      "Strength" = out_df$Prediction_strengh
+      ,
+      "ER score" = out_df$ER_score
+      ,
+      "her2 score" = out_df$Her2_score
+      ,
+      "Prolif score" = out_df$Proliferation_score
+    ))
+    
+    ## Compute heatmap
+    hm_res <- suppressMessages(ComplexHeatmap::Heatmap(z.mat, name = "Z-scores"
+                                                       , col = myRamp
+                                                       , show_row_name = TRUE
+                                                       , cluster_columns = hc.s
+                                                       , cluster_rows = hc.g
+                                                       , top_annotation = ha1
+                                                       , use_raster = TRUE
+                                                       , raster_device = 'png'
+    ))
+    ## Draw heatmap
+    pf_root <- paste0(out_dir, '/', pam_method, '_', nrow(z.mat), 'f.', ncol(z.mat), 's')
+    pw <- (max(min(ncol(z.mat) * 15, 2000), 600) + 200)
+    ph <- (min(nrow(z.mat) * 15, 5000) + 300)
+    svg(filename = paste0(pf_root, '_exp.heatmap.svg'), width = pw/96, height = ph/96)
+    ComplexHeatmap::draw(hm_res)
+    svg_off()
+    
+    ### CORR PLOT
+    z.mat <- (pam50_pred$cor - rowMeans(pam50_pred$cor, na.rm = TRUE)) / matrixStats::rowSds(pam50_pred$cor, na.rm = TRUE)
+    
+    heatmap.palette = c("royalblue3", "ivory", "orangered3")
+    myRamp <- circlize::colorRamp2(c(-1, 0, 1), heatmap.palette)
+    
+    ## Clustering samples
+    hc.c <- hclust(amap::Dist(x = t(pam50_pred$cor), method = "euclidean"), method = "ward.D")
+    ## Clustering genes
+    hc.r <- hclust(amap::Dist(x = pam50_pred$cor, method = feat_dist), method = feat_agg)
+    ## Samples annotation
+    set.seed(my_seed)
+    ha1 = ComplexHeatmap::rowAnnotation(df = data.frame(
+      "PAM50 pred" = out_df$Predicted_subtype
+      ,
+      "Confidence" = out_df$Prediction_confidence
+      ,
+      "Strength" = out_df$Prediction_strengh
+      ,
+      "ER score" = out_df$ER_score
+      ,
+      "her2 score" = out_df$Her2_score
+      ,
+      "Prolif score" = out_df$Proliferation_score
+    ))
+    
+    ## Compute heatmap
+    hm_res <- suppressMessages(ComplexHeatmap::Heatmap(pam50_pred$cor, name = "Spearman corr"
+                                                       , col = myRamp
+                                                       , show_row_name = TRUE
+                                                       , cluster_columns = hc.c
+                                                       , cluster_rows = hc.r
+                                                       , left_annotation = ha1
+                                                       , use_raster = FALSE
+                                                       , raster_device = 'png'
+    ))
+    ## Draw heatmap
+    pf_root <- paste0(out_dir, '/', pam_method)
+    pw <- (max(min(ncol(z.mat) * 15, 2000), 600) + 200)
+    ph <- (min(nrow(z.mat) * 15, 5000) + 300)
+    svg(filename = paste0(pf_root, '_cor.heatmap.svg'), width = pw/96, height = ph/96)
+    ComplexHeatmap::draw(hm_res)
+    svg_off()
+  }
+}
+
+
 ## Aggregate different metrics from multiple DE_run() results ====
 ### . 'dea_path' :  char;     Path to one or multiple DEA_res output(s).
 ### . 'summarize' : logical;  If TRUE, returns an aggregated data.frame. If FALSE, a list
