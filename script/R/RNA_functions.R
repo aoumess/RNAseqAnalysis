@@ -203,7 +203,42 @@ htgxls_import <- function(xls.files = NULL, n.samples = c(24), samplenames.row =
   return(xl.df)
 }
 
+## . Graphics ====
 
+## Save ggplot to multi devices ====
+## Function to save a plot to multiple file formats (by ex, SVG+PNG) at once.
+##  . optionally save the gg_plot object as RDS
+##  . "..." = passed arguments to ggplot2::ggsave()
+ggmulti <- function(gg_object = NULL, devices = c('svg', 'png'), file = NULL, save_gg_object = TRUE, ...) {
+  ## Checks
+  # if (is.null(gg_object)) stop('A ggplot object is required !')
+  if (is.null(gg_object)) message('No ggplot2 object provided : the last drawn plot will be used ...')
+  if (is.null(file)) stop('An output filename is required !')
+  if (is.null(devices)) stop('An output device is required !')
+  if (length(devices) == 0) stop('At least one output device is required !')
+  if (!is.logical(save_gg_object)) stop('[gg_save_object] should be a logical !')
+  # if (!ggplot2::is_ggplot(gg_object)) stop('The input should be a gg_plot object ! If one used default R plot system, one can convert it to gg_plot using ggplotify::as.ggplot()')
+  
+  ## Trying to rescue some plot types !
+  ### NULL
+  if (is.null(gg_object)) gg_object <- ggplot2::last_plot()
+  ### Non-ggplot2
+  if (!ggplot2::is_ggplot(gg_object)) {
+    if ('HeatmapList' %in% is(gg_object)) {
+      gg_object <- grid::grid.grabExpr(expr = ComplexHeatmap::draw(gg_object))
+    } else {
+      gg_object <- ggplotify::as.ggplot(gg_object)
+    }
+  }
+
+  ## Save gg_plot object
+  if (save_gg_object) saveRDS(object = gg_object, file = paste0(file, '.RDS'), compress = 'xz')
+  
+  ## Looping on file formats
+  for (dev in devices) {
+    suppressWarnings(ggplot2::ggsave(filename = paste0(file, ".", tolower(dev)), plot = gg_object, device = dev, units = 'px', ...))
+  }
+}
 
 ## Convert SVG to PNG ====
 .svg_convert <- function(svg_files = NULL, format = 'png', compress = TRUE, ...) {
@@ -237,8 +272,6 @@ svg_off <- function(format = 'png', compress = TRUE, ...) {
 }
 
 
-
-## . Graphics ====
 
 ## Generate a vetor of distinctive colors ====
 distinct_color_maker <- function(n_colors = 10, my_seed = 1337, ...) {
@@ -305,8 +338,8 @@ gsea_merge_dotplot <- function(gsea_res_list = NULL, title = "DotPlot", intersec
   
   ## Checks
   if(is.null(gsea_res_list)) stop("A list of gseaResults is required !")
-  if(!is.char(title)) stop("Title should be character !")
-  if(!anyc(plot, return_object)) {
+  if(!is.character(title)) stop("Title should be character !")
+  if(!any(c(plot, return_object))) {
     warning("No plot drawing nor return requested : nothing to do !")
     return()
   }
@@ -442,6 +475,36 @@ gmt_convert <- function(gmt_file_in = NULL, gmt_file_out = NULL, gene_type_in = 
 
 
 ## . Data transformation ====
+
+## Convert a count matrix (rownames can be SYMBOL or ENTREZID) to TPM, using a txdb and orgdb to get transcript lengths (the longest transcript length per gene is used)
+counts_to_tpm <- function(counts_mat = NULL, txdb = 'TxDb.Hsapiens.UCSC.hg38.knownGene', orgdb = 'org.Hs.eg.db', gene_type = 'SYMBOL') {
+  ### Load txdb
+  library(package = txdb, character.only = TRUE)
+  ### Get length
+  gLen <- GenomicFeatures::transcriptLengths(txdb = getExportedValue(txdb, txdb), with.cds_len = TRUE)
+  ### Aggregate by EntrezId
+  gLen <- tibble::as_tibble(gLen)
+  gLen <- dplyr::group_by(.data = gLen, gene_id)
+  gLen <- as.data.frame(dplyr::summarise(.data = gLen, len = max(tx_len)))
+  colnames(gLen)[colnames(gLen) == 'gene_id'] <- 'ENTREZID'
+  ### Handle SYMBOL case
+  ### Convert to symbols
+  if(toupper(gene_type) %in% 'SYMBOL') {
+    library(package = orgdb, character.only = TRUE)
+    gconv <- clusterProfiler::bitr(geneID = gLen$ENTREZID, fromType = 'ENTREZID', toType = 'SYMBOL', OrgDb = getExportedValue(orgdb, orgdb))
+    E2S <- setNames(object = gconv$SYMBOL, nm = gconv$ENTREZID)
+    gLen$SYMBOL <- E2S[gLen$ENTREZID]
+  }
+  ### Synch counts and glen
+  counts_mat <- counts_mat[rownames(exp_mat) %in% gLen[[gene_type]],]
+  counts_mat <- counts_mat[order(rownames(counts_mat)),]
+  gLen <- gLen[gLen[[gene_type]] %in% rownames(counts_mat),]
+  gLen <- gLen[order(gLen[[gene_type]]),]
+  all(gLen_agg[[gene_type]] == rownames(counts_mat))
+  ### Convert counts to TPM
+  tpm <- DGEobj.utils::convertCounts(countsMatrix = counts_mat, unit = 'TPM', geneLength = gLen$len, log = FALSE, normalize = FALSE)
+  return(tpm)
+}
 
 ## Convert raw intensities/counts to log (custom base) with an added epsilon (by exemple : counts to log10(counts+1)) ====
 raw2log <- function(x = NULL, log_base = 10, epsilon = 1) {
@@ -671,7 +734,7 @@ AQM_run <- function(mat = NULL, pheno_df = NULL, pheno_colnames = NULL, to_log =
 ## . coef.cut           [0<=num<1]              Do not display coefficients inferior to this value on the heatmap
 ## . color.palette      [vec(col)]              Color vector (length 2) for the heatmap
 ## . out.file           [char]                  Output PNG file name (and path)
-assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti.names = NULL, red.method = 'pca', ndim.max = 10, topvar = NULL, center = TRUE, scale = TRUE, coef.cut = 0, color.palette = c("white", "orangered3"), out.file = paste0(getwd(), '/Assess_covariates.svg'), width = 800, height = 1000) {
+assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti.names = NULL, red.method = 'pca', ndim.max = 10, topvar = NULL, center = TRUE, scale = TRUE, coef.cut = 0, color.palette = c("white", "orangered3"), out.file = paste0(getwd(), '/Assess_covariates'), width = NULL, height = NULL) {
   ## Checks
   ### Mandatory
   if (is.null(mat)) stop('A (f feature by s sample) matrix [mat] is required.')
@@ -696,6 +759,10 @@ assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti
   
   ## RUN
   
+  ## Computing plot dims
+  if (is.null(width)) width <- (ncol(annot.df) * 25) + 300
+  if (is.null(height)) height <- (ndim.max * 50) + 300
+  
   ## Restrict to topvar ?
   if(!is.null(topvar)) {
     message('Restricting to the Top ', topvar, ' features ...')
@@ -712,7 +779,7 @@ assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti
   if (any(c(center, scale))) mat <- base::scale(x = mat, center = center, scale = scale)
   ## Dimension reduction
   if (tolower(red.method) == 'pca') norm.red <- base::svd(x = mat, nv = ndim.max)$v
-  if (tolower(red.method) == 'mds.euc') norm.red <- stats::cmdscale(d = dist(x = t(mat), method = 'euclidean'), k = ndim.max)
+  # if (tolower(red.method) == 'mds.euc') norm.red <- stats::cmdscale(d = dist(x = t(mat), method = 'euclidean'), k = ndim.max)
   if (tolower(red.method) == 'mds.spear') norm.red <- stats::cmdscale(d = as.dist(1-cor(mat, method = 'spearman')), k = ndim.max)
   col.names <- c(factor.names, conti.names)
   col.types <- c(rep('factor', length(factor.names)), rep('continuous', length(conti.names)))
@@ -737,6 +804,7 @@ assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti
     }
   }
   bc.mat[bc.mat < coef.cut] <- 0
+  
   ## Heatmap
   myRamp.col <- circlize::colorRamp2(c(0, 1), color.palette)
   BC.hm <- ComplexHeatmap::Heatmap(matrix = bc.mat,
@@ -750,10 +818,353 @@ assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti
                                    row_title = paste0(toupper(red.method), ' dimensions'),
                                    column_split = col.types,
                                    top_annotation = ComplexHeatmap::HeatmapAnnotation(Type = col.types, col = list(Type = setNames(object = c('lightblue','pink'), nm = c('factor', 'continuous')))))
-  svg(filename = out.file, width = width/96, height = height/96)
-  ComplexHeatmap::draw(BC.hm)
-  svg_off()
+  # svg(filename = out.file, width = width/96, height = height/96)
+  # ggp <- ComplexHeatmap::draw(BC.hm, width = width/96, height = height/96)
+  # p <- ComplexHeatmap::draw(BC.hm)
+  # svg_off()
+  
+  ## Save plot as multiple devices
+  ggmulti(gg_object = grid::grid.grabExpr(expr = ComplexHeatmap::draw(BC.hm)), devices = c('svg', 'png'), file = out.file, width = width, height = height, dpi = 300)
 }
+
+## WIP : a way to find regressions to perform ?
+## !!! covars.df MUST have categorical covariates as factors and continuous ones as integers/numerics !!!
+## !!! If not, characters will be converted to factors, integers to numerics !!!
+## Supported [red.method] : 'pca', 'mds.spear' (also 'mds.euc' but that is PCA)
+multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.names[1], red.method = 'pca', ndim.max = 10, data.type = 'norm', center = TRUE, scale = TRUE, plot = FALSE, plot.dir = NULL, color.palette = c("white", "orangered3")) {
+
+  ## Checks
+  ### Factors vs numeric
+  covar_types <- sapply(covars.df, function(x) { is(x)[1]} )
+  if(!all(covar_types %in% c('factor', 'numeric'))) {
+    warning('Some column(s) in [covars.df] are not factor/numeric ! Conversion needed ...')
+    for (ct in seq_along(covar_types)) {
+      if (covar_types[ct] %in% c('character', 'logical')) covars.df[[ct]] <- as.factor(covars.df[[ct]])
+      if (covar_types[ct] %in% 'integer') covars.df[[ct]] <- as.numeric(covars.df[[ct]])
+    }
+  }
+  covar_types <- sapply(covars.df, function(x) { is(x)[1]} )
+  if(!all(covar_types %in% c('factor', 'numeric'))) stop('Some column(s) in [covars.df] are not factor/double, and automatic conversion failed ...')
+  if(!is.factor(covars.df[[interest]])) stop('The factor of interest must be a factor !')
+  if (!is.matrix(mat)) stop('[mat] must be a numeric matrix !')
+  if (is.null(ndim.max)) ndim.max <- ncol(mat) -1
+  if (ndim.max <= 0 ) stop('[ndim.max] must be a positive integer !')
+  if (!is.null(plot.dir)) {
+    if (!dir.exists(plot.dir)) {
+      stop('[plot.dir} does not exist !')
+    } else {
+      plot <- TRUE
+    }
+  }
+
+  ## Convert conti to Zscores
+  if (any(covar_types %in% 'numeric')) {
+    message('Z-scoring continuous covariates ...')
+    for (x in names(covar_types[covar_types %in% 'numeric'])) covars.df[[x]] <- (covars.df[[x]] - mean(covars.df[[x]], na.rm = TRUE)) / sd(covars.df[[x]], na.rm = TRUE)
+  }
+
+  ## FUNCTION : Test covariates and data association
+  .asscovar <- function(mat = NULL, covars.df = NULL, red.method = 'pca', center = TRUE, scale = TRUE, ndim.max = ncol(mat)-1) {
+    ## Separate factor and continuous covariates names
+    covar_types <- sapply(covars.df, function(x) { is(x)[1]} )
+    factor.names <- names(covar_types[covar_types %in% 'factor'])
+    conti.names <- names(covar_types[covar_types %in% 'numeric'])
+
+    ## Center / scale the matrix ?
+    if (any(c(center, scale))) {
+      message('Centering and/or scaling the data matrix ...')
+      mat <- t(base::scale(x = t(mat), center = center, scale = scale))
+    }
+
+    ## Dimension reduction
+    if (tolower(red.method) %in% 'pca') {
+      pca.res <- prcomp(x = t(mat), center = FALSE, scale. = FALSE)
+      norm.red <- pca.res$x[, 1:ndim.max]
+      weights <- ((pca.res$sdev[1:ndim.max]^2) / sum(pca.res$sdev^2))
+      rm(pca.res)
+    }
+    if (tolower(red.method) %in% 'mds.spearman') {
+      mds.res <- stats::cmdscale(d = as.dist(1-cor(mat, method = 'spearman')), k = min(ndim.max, ncol(mat)-1), list. = TRUE, eig = TRUE, x.ret = TRUE)
+      norm.red <- mds.res$points
+      weights <- (mds.res$eig[1:ncol(norm.red)] / sum(mds.res$eig))
+      rm(mds.res)
+    }
+    if (tolower(red.method) %in% 'mds.pearson') {
+      mds.res <- stats::cmdscale(d = as.dist(1-cor(mat, method = 'pearson')), k = min(ndim.max, ncol(mat)-1), list. = TRUE, eig = TRUE, x.ret = TRUE)
+      norm.red <- mds.res$points
+      weights <- (mds.res$eig[1:ncol(norm.red)] / sum(mds.res$eig))
+      rm(mds.res)
+    }
+    if (tolower(red.method) %in% 'mds.manhattan') {
+      mds.res <- stats::cmdscale(d = dist(x = t(mat), method = 'manhattan'), k = min(ndim.max, ncol(mat)-1), list. = TRUE, eig = TRUE, x.ret = TRUE)
+      norm.red <- mds.res$points
+      weights <- (mds.res$eig[1:ncol(norm.red)] / sum(mds.res$eig))
+      rm(mds.res)
+    }
+    if (tolower(red.method) %in% 'ica.var') {
+      ica_res <- ica::ica(t(mat), method = 'fast', nc = ndim.max, center = FALSE)
+      norm.red <- ica_res$S
+      weights <- ica_res$vafs
+      rm(ica_res)
+    }
+    if (tolower(red.method) %in% 'ica.kurtosis') {
+      ica_res <- ica::ica(t(mat), method = 'fast', nc = ndim.max, center = FALSE)
+      norm.red <- ica_res$S
+      weights <- vapply(seq_len(ndim.max), function(x) e1071::kurtosis(norm.red[,x], na.rm = TRUE, type = 2), .1)
+      kord <- order(weights, decreasing = TRUE)
+      weights <- weights[kord]
+      norm.red <- norm.red[,kord]
+      rm(ica_res, kord)
+    }
+    if (tolower(red.method) %in% 'icpca') {
+      ica_res <- ica::ica(t(mat), method = 'fast', nc = ndim.max*2, center = FALSE)
+      pca.res <- prcomp(x = ica_res$S, retx = TRUE, center = TRUE, scale. = TRUE)
+      norm.red <- pca.res$x[, 1:ndim.max]
+      weights <- ((pca.res$sdev[1:ndim.max]^2) / sum(pca.res$sdev^2))
+      rm(ica.res, pca.res)
+    }
+
+    ## Setting output matrix
+    scaler <- (weights / sum(weights)) * 100
+    # scaler <- weights
+    bc.mat <- matrix(NA, nrow = ncol(norm.red), ncol = ncol(covars.df), dimnames = list(paste0(toupper(red.method), seq_along(scaler), ' (', format(scaler, digits = 3, scientific = TRUE), '%)'), colnames(covars.df)))
+
+    ## Filling matrix
+    for (cn in seq_len(ncol(covars.df))) {
+      # message(col.names[cn])
+      if (colnames(covars.df)[cn] %in% conti.names) {
+        cv2cor <- covars.df[[colnames(covars.df)[cn]]]
+        nona <- !is.na(cv2cor)
+        bc.mat[, cn] <-  abs(cor(x = cv2cor[nona], y = norm.red[nona,], method = 'spearman'))
+      } else if (colnames(covars.df)[cn] %in% factor.names & length(unique(covars.df[[colnames(covars.df)[cn]]])) > 1) {
+        b2kw <- covars.df[[colnames(covars.df)[cn]]]
+        nona <- !is.na(b2kw)
+        for (si in seq_along(scaler)) {
+          k_test <- try(k_res <- kruskal.test(x = norm.red[nona,si], g = as.factor(b2kw[nona])), silent = TRUE)
+          if (!is(k_test, class2 = 'try-error')) {
+            bc.mat[si,cn] <- k_res$statistic / nrow(norm.red)
+          } else bc.mat[si,cn] <- 0
+        }
+      }
+    }
+    ## Version : FULL
+    # wscore <- colSums(bc.mat * weights)
+    ## Version : 2 first components
+    wscore <- colSums(bc.mat[1:2,] * weights[1:2])
+    ## Return
+    return(list(covar.w = bc.mat, red.w = wscore))
+  }
+
+  ## FUNCTION : Heatmap
+  .bc_heatmap <- function (bc.mat = NULL, color.palette = NULL, col.types = NULL) {
+    myRamp.col <- circlize::colorRamp2(c(0, 1), color.palette)
+    BC.hm <- ComplexHeatmap::Heatmap(matrix = bc.mat[1:ndim.max,],
+                                     name = 'Weight',
+                                     col = myRamp.col,
+                                     na_col = 'grey75',
+                                     cluster_rows = FALSE,
+                                     cluster_columns = FALSE,
+                                     rect_gp = grid::gpar(col = "darkgrey", lwd=0.5),
+                                     column_title = 'Batch factors and covariates weight on dataset',
+                                     row_title = 'Dimensions',
+                                     column_split = col.types,
+                                     top_annotation = ComplexHeatmap::HeatmapAnnotation(Type = col.types, col = list(Type = setNames(object = c('lightblue','pink'), nm = c('numeric', 'factor')))))
+    return(BC.hm)
+  }
+  
+  ### Check if putative wbest is not confounded with interest
+  .factor_checker <- function(factors.df = NULL) {
+    Xbatch <- Reduce(f = cbind, x = lapply(colnames(factors.df), FUN = function(x) { model.matrix(~factors.df[[x]])[, -1, drop = FALSE] }))
+    Xcheck <- limma::nonEstimable(Xbatch)
+    return(Xcheck)
+  }
+
+  ## Initiating recursive loop
+  cov2keep <- c()
+  tmp.mat <- mat
+  tmp.covars.df <- covars.df
+  wbest <- NULL
+  iscore <- 0
+  main.end.flag <- FALSE
+  iter <- 0
+  while (!main.end.flag) {
+    
+    iter <- iter +1
+    
+    ## Regen covariates type
+    tmp.covar_types <- sapply(tmp.covars.df, function(x) { is(x)[1]} )
+    
+    ## Get scores
+    ac.res <- .asscovar(mat = tmp.mat, covars.df = tmp.covars.df, red.method = red.method, center = center, scale = scale, ndim.max = ndim.max)
+    ac.scores <- sort(ac.res$red.w[!names(ac.res$red.w) %in% interest & !is.na(ac.res$red.w)], decreasing = TRUE)
+    cur.score <- ac.res$red.w[[interest]]
+    message('[[', interest, ']] is ranked [', base::rank(-ac.res$red.w[!is.na(ac.res$red.w)])[[interest]], '/', length(which(!is.na(ac.res$red.w))), '] with a score of [', cur.score, ']')
+    
+    ## Evaluate global score
+    if (!is.null(wbest)) {
+      if (cur.score > iscore) {
+        
+        message('We have a positive covariate : [', wbest, '] !')
+        cov2keep <- append(cov2keep, wbest)
+        iscore <- cur.score
+        
+        # Plot weights ?
+        if (plot) {
+          dir.create(path = plot.dir, recursive = TRUE)
+          BC.hm <- .bc_heatmap(bc.mat = ac.res$covar.w, color.palette = color.palette, col.types = tmp.covar_types[colnames(ac.res$covar.w)])
+          ggplot2::ggsave(filename = paste0(plot.dir, '/COVARS.', interest, '_', sprintf(iter, fmt = '%02d'), '_', if(!is.null(wbest)) wbest else 'unregressed', '.svg'), plot = ggplotify::as.grob(BC.hm), width = 10, height = 7, dpi = 300)
+        }
+      } else {
+        main.end.flag <- TRUE
+      }
+    } else {
+      # Plot weights ?
+      if (plot) {
+        dir.create(path = plot.dir, recursive = TRUE)
+        BC.hm <- .bc_heatmap(bc.mat = ac.res$covar.w, color.palette = color.palette, col.types = tmp.covar_types[colnames(ac.res$covar.w)])
+        ggplot2::ggsave(filename = paste0(plot.dir, '/COVARS.', interest, '_', sprintf(iter, fmt = '%02d'), '_', if(!is.null(wbest)) wbest else 'unregressed', '.svg'), plot = ggplotify::as.grob(BC.hm), width = 10, height = 7, dpi = 300)
+      }
+    }
+    
+    ## Only continue if we still have a better score
+    if (!main.end.flag) {
+      
+      ## Selec best putative covariate
+      wbest <- names(ac.scores[1])
+      wb_type <- tmp.covar_types[[wbest]]
+      
+      ## Check putative covariate, change if not compatible
+      check.end.flag <- FALSE
+      while (!check.end.flag) {
+        ## Is it a numeric ?
+        if (wb_type %in% 'numeric') {
+          ### It is
+          if (wbest %in% cov2keep) {
+            ac.scores <- ac.scores[-1]
+            wbest <- names(ac.scores[1])
+            wb_type <- tmp.covar_types[[wbest]]
+          } else {
+            check.end.flag <- TRUE
+          }
+        } else {
+          ## It is a factor
+          ## Is it already known ?
+          if (wbest %in% cov2keep) {
+            ac.scores <- ac.scores[-1]
+            wbest <- names(ac.scores[1])
+            wb_type <- tmp.covar_types[[wbest]]
+          } else {
+            fc_res <- .factor_checker(factors.df = tmp.covars.df[, c(interest, cov2keep, wbest)])
+            ### Design matrix is not full rank !!!
+            if (!is.null(fc_res)) {
+              ac.scores <- ac.scores[-1]
+              wbest <- names(ac.scores[1])
+              ### Selected covariate is interest !!!
+              if (wbest %in% interest) {
+                wbest <- NULL
+                w_type <- NULL
+                check.end.flag <- TRUE
+              } else {
+                wb_type <- tmp.covar_types[[wbest]]
+              }
+            } else {
+              check.end.flag <- TRUE
+            }
+          }
+        }
+      }
+      ## Check if we have a valid putative covariate case
+      if (is.null(wbest)) {
+        main.end.flag <- TRUE
+      } else {
+        
+        ## Regress
+        message('Regressing for [', wbest, '] ...')
+        suppressMessages(tmp.mat <- matrix_covar_regress(mat = tmp.mat, type = data.type, covar_factor_df = if(wb_type == 'factor') data.frame(covariate = as.factor(tmp.covars.df[[wbest]])) else NULL, covar_conti_df = if(wb_type == 'numeric') data.frame(covariate = tmp.covars.df[[wbest]]) else NULL, group = as.factor(tmp.covars.df[[interest]])))
+        iscore <- cur.score
+        
+      }
+    }
+  }
+
+  return(cov2keep)
+}
+
+
+
+# ## data prep
+# in_rds <- "/home/job/WORKSPACE/BiGR/PROJECTS/B25036_BRAC_02_RT09.722_GeoMX/RESULTS/RNAseq_geomx_20250823134642_HIGH.STRINGENCY/QC/Raw_outlier.filtered_426s.RDS"
+# # newannot_xlsx <- "/home/job/WORKSPACE/BiGR/PROJECTS/B25036_BRAC_02_RT09.722_GeoMX/DATA/ANNOT/RT09.722_GeoMX_annotation_20250826.xlsx"
+# newannot_xlsx <- "/home/job/WORKSPACE/BiGR/PROJECTS/B25036_BRAC_02_RT09.722_GeoMX/DATA/ANNOT/RT09.722_GeoMX_annotation_20250905.xlsx"
+# plot.dir <- '/home/job/WORKSPACE/BiGR/PROJECTS/B25036_BRAC_02_RT09.722_GeoMX/RESULTS/RNAseq_geomx_20250823134642_HIGH.STRINGENCY/DEA_20250901132831_auto_tests/Differential_analysis/Assess_covariates'
+# sname <- 'SegmentDisplayName'
+# diff_categ <- c('AOI_Type')
+# popsel_name <- c('Pathology')
+# plot <- TRUE
+# data.type = 'norm'
+# center = TRUE
+# scale = TRUE
+# 
+# pops_list <- list(c('MicroInv', 'DCIS_near'), c('Stroma_near', 'Stroma_far'))
+# for (popsel_val in c('BRCA', 'LFS', 'Sporadic')) {
+#   for (pops in pops_list) {
+#     # for (red.method in c('mds.manhattan', 'mds.spearman', 'mds.pearson', 'pca', 'ica')) {
+#     for (red.method in c('icpca')) {
+#       for (feat_sel in c(18677, 500)) {
+#         for (ndim.max in c(2, 5,10)) {
+#         # for (ndim.max in c(2,4)) {
+#           pop1 <- pops[1]
+#           pop2 <- pops[2]
+# 
+#           # # popsel_val <- c('BRCA')
+#           # popsel_val <- c('LFS')
+#           # # popsel_val <- c('Sporadic')
+#           # # pop1 <- 'MicroInv'
+#           # pop1 <- 'Stroma_near'
+#           # # pop2 <- 'DCIS_near'
+#           # pop2 <- 'Stroma_far'
+#           # red.method <- 'pca'
+#           # # red.method <- 'mds.spear'
+#           # # ndim.max <- 2
+#           # ndim.max <- 10
+#           # # feat_sel <- NULL
+#           # feat_sel <- 500
+#           #
+#           factor.names <- c('SegmentLabel', 'ROILabel', 'AOILabel', 'Pathology', 'AOI_Type', 'AOINucleiCount_Above_150', 'SlideName_short', 'Cut')
+#           conti.names <- c('AOISurfaceArea', 'Pseudotime1', 'Pseudotime2', 'AOINucleiCount', 'ROILabel_num', 'AOILabel_num', 'RawReads', 'StitchedReads', 'SequencingSaturation')
+#           ##
+#           newannot_df <- as.data.frame(readxl::read_excel(path = newannot_xlsx))
+#           de2 <- readRDS(in_rds)
+#           de2 <- de2[,de2[[diff_categ]] %in% c(pop1, pop2) & de2[[popsel_name]] %in% popsel_val]
+#           mat_raw <- SummarizedExperiment::assay(de2)
+#           rm(de2)
+#           newannot_df <- newannot_df[newannot_df[[sname]] %in% colnames(mat_raw),]
+#           mat_raw <- mat_raw[,colnames(mat_raw) %in% newannot_df[[sname]]]
+#           all(colnames(mat_raw) == newannot_df[[sname]])
+#           de2b <- DESeq2::DESeqDataSetFromMatrix(countData = mat_raw, colData = newannot_df, design =  as.formula("~0"))
+#           de2.norm <- DESeq2::vst(object = de2b, blind = TRUE)
+#           rm(de2b)
+#           mat <- SummarizedExperiment::assay(de2.norm)
+#           if (!is.null(feat_sel)) mat <- mat[names(sort(matrixStats::rowVars(mat), decreasing = TRUE))[1:feat_sel],]
+#           covars.df <- de2.norm@colData[,c(factor.names, conti.names)]
+#           covars.df[[paste0(diff_categ, '_in_', popsel_val)]] <- covars.df[[diff_categ]]
+#           interest <- paste0(diff_categ, '_in_', popsel_val)
+#           factor.names <- unique(c(factor.names, interest))
+#           factor.names <- factor.names[-which(factor.names %in% diff_categ)]
+#           covars.df <- covars.df[,-which(colnames(covars.df) %in% diff_categ)]
+#           color.palette = c("white", "orangered3")
+#           ## RUN
+#           odir <- paste0(plot.dir, '/', paste(c(red.method, paste0('ndim', ndim.max), feat_sel), collapse = '_'), '/', interest, '/', pop1, '_vs_', pop2)
+#           dir.create(path = odir, recursive = TRUE)
+#           auto_covars <- multitest_covar(mat = mat, covars.df = covars.df, interest = interest, red.method = red.method, ndim.max = ndim.max, data.type = data.type, center = center, scale = scale, plot = plot, plot.dir = odir, color.palette = color.palette)
+#           auto_covars
+#         }
+#       }
+#     }
+#   }
+# }
+
+
 
 
 ## Convert a factor to a design dataframe to be used in DE_run ====
@@ -935,7 +1346,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## design.df              data.frame          Design of comparisons to perform. Should contain these column names : [Samples_colname] = Column name of sample names ; [Covar_colnames] = Column name(s) of covariates to regress, coma-separated (can be empty if none to regress); [Condition_colname] = Column name of factor condition to explore for the differential analysis ; [Condition_A] = levels to consider as the condition A (test) ; [Condition_B] = levels to consider as the condition B (ref) ; [Comparison_name] = Name to use for results output.
 ## assess.factor          logical             Perform assessment of factor covariates using the provided column name(s) corresponding to factor data columns in annot.df
 ## assess.conti           logical             Perform assessment of continuous covariates using the provided column name(s) corresponding to continuous data columns in annot.df
-## min_count              0<int>+inf          Minimum total counts to keep a feature (gene) : allows to discarded not/poorly expressed features
+## min_count              0<int>+inf          Minimum total counts to keep a feature (gene) : allows to discarded not/poorly expressed features. NULL corresponds to an "automatic" mode were the value is set at 1/10th of the number of samples in the matrix (rounded)
 ## min_sample_freq        0<numeric<1         Minimal frequency of samples considered expressed (counts >0). Globally or per-class, depending on the 'per_class' parameter. Defaults to 50%.
 ## per_class              logical             Apply the min_count filtering on each compared class rather than the total sample population
 ## adjp.max               0<numeric<1         BH FDR-adjusted p-value cut-off to consider differential genes as significant
@@ -963,7 +1374,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## boxplots               bool                If TRUE, draw boxplots of or.top.max genes
 ## save.wald              bool                If TRUE, save the DESeq2 object containing the results of the Wald test. This is FALSE by default, as the resulting object can be pretty big.
 ## color.palette          vec(color)          Vector of 3 colors used for the expression heatmap (lower values, middle, higher)
-DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.factor = NULL, assess.conti = NULL, min_count = 5L, min_sample_freq = .5, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
+DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.factor = NULL, assess.conti = NULL, min_count = NULL, min_var = NULL,  min_sample_freq = .5, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
   
   if (tolower(species) == 'homo sapiens') {
     Org <- 'org.Hs'
@@ -1011,7 +1422,9 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
   if (any(custom.do) & is.null(custom_gmt_list)) stop('GSEA/ORA on custom bank is requested, but no bank list (custom_gmt_list) provided !')
   if (!is.null(custom_gmt_list) & !is.list(custom_gmt_list)) stop('custom_gmt_list should be a named list of terms/genes data.frames as obtained from the clusterProfiler::read.gmt() function !')
   ## Feature filtering
-  if(min_count < 0) stop('min_count should be a positive integer !')
+  if(is.numeric(min_count)) {
+    if(min_count < 0) stop('min_count should be a positive integer !')
+  }
   if(!is.logical(per_class)) stop('per_class should be a logical !')
   
   
@@ -1020,6 +1433,17 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
   suppressPackageStartupMessages(library(ComplexHeatmap))
   suppressPackageStartupMessages(library(circlize))
   
+  ## Set min_count if auto
+  if (is.null(min_count)) min_count <- round(ncol(exp.mat)/10)
+  
+  ## Filter features with weak variance
+  if (!is.null(min_var)) {
+    message('Filtering features with weak contribution to the variance ...')
+    ## Discard low variance genes
+    rv <- matrixStats::rowVars(exp.mat)
+    ### < .2 mode
+    exp.mat <- exp.mat[names(rv)[rv > .2],]
+  }
   
   ## Looping on design entries
   for (cur.idx in seq_len(nrow(design.df))) {
@@ -1382,7 +1806,7 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
       ph <- 1000
       pw <- 1100
       svg(filename = pf, width = pw/96, height = ph/96)
-      try(print(ggplot2::autoplot(prcomp(t(norm.mat)), data = as.data.frame(SummarizedExperiment::colData(DE2obj)), colour = p, size = 3)), silent = TRUE)
+      try(print(ggplot2::autoplot(prcomp(t(norm.mat)), data = as.data.frame(SummarizedExperiment::colData(DE2obj)), colour = p, size = 3, label = TRUE, label.label = 'rownames')), silent = TRUE)
       svg_off()
     }
     
@@ -2010,7 +2434,7 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
           for (x in c('BP', 'CC', 'MF')) {
             my.org <- paste0(msigdbr2org(species), '.db')
             library(my.org, character.only = TRUE)
-            my.ora.res <- ora_run(gene = enr.inputs$ora.genevec, species = species, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes, OrgDb = get(my.org), ont = x)
+            my.ora.res <- try(ora_run(gene = enr.inputs$ora.genevec, species = species, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes, OrgDb = get(my.org), ont = x))
             if (!is(my.ora.res, class2 = 'try-error')) {
               my.ora.res@ontology <- paste(c(my.ora.res@ontology, x), collapse = '_')
               ## Simplify
@@ -2081,7 +2505,7 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
         ### ORA
         if(wp.do[2]) {
           func.name <- 'clusterProfiler::enrichWP'
-          my.ora.res <- ora_run(gene = enr.inputs$ora.genevec, organism = species, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes)
+          my.ora.res <- try(ora_run(gene = enr.inputs$ora.genevec, organism = species, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes))
           if (!is(my.ora.res, class2 = 'try-error')) if (!is.null(my.ora.res)) ora_output(enrichResult = my.ora.res, out.dir = cut.dir, comp.name = cur.name, geneList = enr.inputs$gsea.genevec, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms)
         }
       }
@@ -2101,9 +2525,14 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
         if(reactome.do[2]) {
           ### ORA
           func.name <- 'ReactomePA::enrichPathway'
-          my.ora.res <- ora_run(gene = enr.inputs$ora.genevec, organism = reactome.org, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes)
-          my.ora.res@ontology <- paste0(func.name, '_Reactome')
-          if (!is(my.ora.res, class2 = 'try-error')) if (!is.null(my.ora.res)) ora_output(enrichResult = my.ora.res, out.dir = cut.dir, comp.name = cur.name, geneList = enr.inputs$gsea.genevec, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms)
+          my.ora.res <- try(ora_run(gene = enr.inputs$ora.genevec, organism = reactome.org, func.name = func.name, t2g = NULL, t2g.name = NULL, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes))
+          
+          if (!is(my.ora.res, class2 = 'try-error')) {
+            if (!is.null(my.ora.res)) {
+              my.ora.res@ontology <- paste0(func.name, '_Reactome')
+              ora_output(enrichResult = my.ora.res, out.dir = cut.dir, comp.name = cur.name, geneList = enr.inputs$gsea.genevec, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms)
+            }
+          }
         }
       }
       
@@ -2189,7 +2618,7 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
             if(custom.do[2]) {
               ### ORA
               func.name <- 'clusterProfiler::enricher'
-              my.ora.res <- ora_run(gene = enr.inputs$ora.genevec, species = species, func.name = func.name, t2g = custom_gmt_list[[cdb]], t2g.name = cdb, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes)
+              my.ora.res <- try(ora_run(gene = enr.inputs$ora.genevec, species = species, func.name = func.name, t2g = custom_gmt_list[[cdb]], t2g.name = cdb, gene2Symbol = enr.inputs$gene2Symbol, pvalueCutoff = enrp.max, minGSSize = enr.min.genes))
               if (!is(my.ora.res, class2 = 'try-error')) if (!is.null(my.ora.res)) ora_output(enrichResult = my.ora.res, out.dir = cut.dir, comp.name = cur.name, geneList = enr.inputs$gsea.genevec, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms)
             }
           }
@@ -3254,8 +3683,8 @@ ora_output <- function(enrichResult = NULL, comp.name = 'TEST', out.dir = getwd(
 ### . calibration = Type of calibration to perform using the "original" implementation (NA = automatic centering ; -1  = no calibration ; a symbol-named vector of values = the calibration values for each gene)
 pam50_pred <- function(exp_mat = NULL, pam_method = "pam50", calibration = -1, plot = TRUE, samp_dist = "spearman", samp_agg = "ward.D", feat_dist = "spearman", feat_agg = "ward.D", center = FALSE, scale = FALSE, return_data = FALSE, out_dir = getwd(), my_seed = 1L) {
   ## Checks
-  if (is.null(exp.mat)) stop('An expression matrix is required !')
-  if (!is.matrix(exp.mat)) stop('"exp_mat" is not a matrix !')
+  if (is.null(exp_mat)) stop('An expression matrix is required !')
+  if (!is.matrix(exp_mat)) stop('"exp_mat" is not a matrix !')
   ok_methods <- c('pam50', 'pam50.robust', 'pam50.scale')
   if (!tolower(pam_method) %in% ok_methods) stop('"pam_method" not recognized ! Should be one of "', paste(ok_methods, collapse = '", "'), '"')
   if (!dir.exists(out_dir)) stop('Output directory [', out_dir, '] does not exist !')
@@ -3323,8 +3752,8 @@ pam50_pred <- function(exp_mat = NULL, pam_method = "pam50", calibration = -1, p
   genomicWprolif <- 100 * (genomicWprolif + 0.35 ) / 0.85
   
   ### Build output table
-  out_df <- data.frame(pam50_pred$subtype, call.conf, pam50_pred$prediction.strength$ps.individual, pam50_pred$cor, pam50_pred$subtype.proba, genomic, griskgroups, genomicWprolif, gpriskgroups, erScore, her2Score, prolifScore)
-  colnames(out_df) <- c("Predicted_subtype", "Prediction_confidence", "Prediction_strengh", "Cor.Basal", "Cor.Her2", "Cor.LumA", "Cor.LumB", "Cor.Normal", "Proba.Basal", "Proba.Her2", "Proba.LumA", "Proba.LumB", "Proba.Normal", "ROR-S (Subtype Only)", "ROR-S Group (Subtype Only)", "ROR-P (Subtype + Proliferation)", "ROR-P Group (Subtype + Proliferation)", "ER_score", "Her2_score", "Proliferation_score")
+  out_df <- data.frame(colnames(exp_mat), pam50_pred$subtype, call.conf, pam50_pred$prediction.strength$ps.individual, pam50_pred$cor, pam50_pred$subtype.proba, genomic, griskgroups, genomicWprolif, gpriskgroups, erScore, her2Score, prolifScore)
+  colnames(out_df) <- c('Sample', "Predicted_subtype", "Prediction_confidence", "Prediction_strengh", "Cor.Basal", "Cor.Her2", "Cor.LumA", "Cor.LumB", "Cor.Normal", "Proba.Basal", "Proba.Her2", "Proba.LumA", "Proba.LumB", "Proba.Normal", "ROR-S (Subtype Only)", "ROR-S Group (Subtype Only)", "ROR-P (Subtype + Proliferation)", "ROR-P Group (Subtype + Proliferation)", "ER_score", "Her2_score", "Proliferation_score")
   
   ### Write output table
   data.table::fwrite(x = out_df, file = paste0(out_dir, '/', pam_method, '_prediction.tsv'), sep = "\t")
