@@ -574,7 +574,72 @@ msigdbr2org <- function(species = NULL) {
 ### . 'p.cutoff' : numeric ; cutoff to use to select 'topN' genes on 'p.colname' when there are less significant genes than 'topN'.
 ### . 'stat.keep.operator' : character ; operator (given as a character) to keep genes when evaluating their 'p.colname' value to 'p.cutoff' (usually one of '<', '<=', '>', '>=').
 ### . '...' : any parameter to read.table() to handle the input file (usually 'sep = "\t", header = TRUE, as.is = TRUE')
-table2enr <- function(deseq2.res.data = NULL, species = "Homo sapiens", geneid.colname = 'Gene_Name', geneid.type = 'SYMBOL', stat.colname = 'stat_change', stat.keep.operator = '>', stat.cutoff = 0, stat.abs = TRUE, topN.max = 100, p.colname = 'Adjusted_PValue', p.cutoff = 5E-02) {
+# table2enr <- function(deseq2.res.data = NULL, species = "Homo sapiens", geneid.colname = 'Gene_Name', geneid.type = 'SYMBOL', stat.colname = 'stat_change', stat.keep.operator = '>', stat.cutoff = 0, stat.abs = TRUE, topN.max = 100, p.colname = 'Adjusted_PValue', p.cutoff = 5E-02) {
+#   ## Checks
+#   ## Loading the DE table
+#   deres <- deseq2.res.data
+#   ## Forcing gene ID to be a character
+#   deres[[geneid.colname]] <- as.character(deres[[geneid.colname]])
+#   ## Converting non-Entrez IDs to Entrez IDs
+#   if (geneid.type != 'ENTREZID') {
+#     ## Building the gene ID conversion vector
+#     gconv <- base::as.list(clusterProfiler::bitr(deres[[geneid.colname]], fromType = geneid.type, toType = 'ENTREZID', OrgDb = paste0(msigdbr2org(species), '.db')))
+#     names(gconv$ENTREZID) <- gconv[[geneid.type]]
+#     names(gconv[[geneid.type]]) <- gconv$ENTREZID
+#     deres$ENTREZID <- gconv$ENTREZID[as.character(deres[[geneid.colname]])]
+#   } else {
+#     gconv <- list(ENTREZID = setNames(deres$ENTREZID, deres$ENTREZID))
+#     deres$ENTREZID <- deres[[geneid.colname]]
+#   }
+#   ## Removing entries without EntrezID
+#   na.entrez <- is.na(deres$ENTREZID)
+#   deres <- deres[!na.entrez,]
+#   message(paste0('Removed ', length(which(na.entrez)), ' lines without EntrezID value.'))
+#   ## Removing entries with duplicated EntrezID
+#   dup.entrez.names <- unique(deres$ENTREZID[duplicated(deres$ENTREZID)])
+#   dup.entrez <- deres$ENTREZID %in% dup.entrez.names
+#   deres <- deres[!dup.entrez,]
+#   message(paste0('Removed ', length(which(dup.entrez)), ' lines (', length(dup.entrez.names), ' genes) with replicated EntrezID value.'))
+#   ## Formatted input
+#   ## GSEA
+#   gsea.genevec <- sort(setNames(deres[[stat.colname]], deres$ENTREZID), decreasing = TRUE)
+#   ## ORA
+#   if (!is.null(topN.max)) {
+#     deres2 <- deres[!is.na(deres[[p.colname]]) & !is.na(deres[[stat.colname]]),]
+#     if (stat.abs) {
+#       deres2$abs <- abs(deres2[[stat.colname]])
+#       stat.colname <- 'abs'
+#     }
+#     deres2 <- deres2[deres2[[p.colname]] < p.cutoff & eval(parse(text = paste0('deres2[["', stat.colname, '"]] ', stat.keep.operator, ' stat.cutoff'))),,drop = FALSE]
+#     top.keep <- min(nrow(deres2), topN.max)
+#     ora.genevec <- if(top.keep > 0) setNames(deres2$ENTREZID[1:top.keep], deres2[[geneid.colname]][1:top.keep]) else c()
+#   } else ora.genevec <- NULL
+#   
+#   return(list(gsea.genevec = gsea.genevec,
+#               ora.genevec = ora.genevec,
+#               gene2Symbol = gconv$ENTREZID))
+# }
+
+
+
+## (V2) Create input objects for gsea_run() and ora_run() from an output of our rna-salmon-deseq2 pipeline ====
+### . 'deseq2.res.data' : data.frame ; output table from the rna-salmon-deseq2 pipeline
+### . 'species' : character ; species name (Homo sapiens, Mus musculus, etc ...)
+### . 'geneid.colname' : character ; column name in 'deseq2.res.file' input for the gene identifier.
+### . 'geneid.type' : character ; type of gene identifier. Should be one value of the output of clusterProfiler::idType("org.Xx.eg.db") (with 'Xx' corresponding as the species of interest). Usually 'SYMBOL' or 'ENSEMBL'.
+### . 'stat.colname' : character ; column name in 'deseq2.res.file' input for the (numeric/integer) values to use in GSEA (ie, logFoldChange).
+### . 'topN.max' : integer ; maximum number of significant genes to keep for ORA (may be inferior if fewer genes were found as differentially expressed)
+### . 'p.colname' : character ; column name in 'deseq2.res.file' input to use to order the table before selecting the 'topN' genes for ORA.
+### . 'p.cutoff' : numeric ; cutoff to use to select 'topN' genes on 'p.colname' when there are less significant genes than 'topN'.
+### . 'stat.keep.operator' : character ; operator (given as a character) to keep genes when evaluating their (absolute or not) 'stat.colname' value to 'stat.cutoff' (usually one of '<', '<=', '>', '>=').
+### . 'gsea.output.value' : can take these values :
+###     - 'stat' :          the value of 'stat.colname'
+###     - 'stat.abs' :      the ABSOLUTE value of 'stat.colname'
+###     - '-l10p' :         the -log10('p.colname')
+###     - '-l10p.signed' :  the -log10('p.colname') * sign('stat.colname')
+###     - '-l10p.stat' :    the product of -log10('p.colname') * 'stat.colname'
+### . '...' : any parameter to read.table() to handle the input file (usually 'sep = "\t", header = TRUE, as.is = TRUE')
+table2enr <- function(deseq2.res.data = NULL, species = "Homo sapiens", geneid.colname = 'Gene_Name', geneid.type = 'SYMBOL', stat.colname = 'stat_change', stat.keep.operator = '>', stat.cutoff = 0, stat.abs = TRUE, p.colname = 'Adjusted_PValue', p.cutoff = 5E-02, gsea.output.value = 'stat', topN.max = 100) {
   ## Checks
   ## Loading the DE table
   deres <- deseq2.res.data
@@ -600,9 +665,24 @@ table2enr <- function(deseq2.res.data = NULL, species = "Homo sapiens", geneid.c
   dup.entrez <- deres$ENTREZID %in% dup.entrez.names
   deres <- deres[!dup.entrez,]
   message(paste0('Removed ', length(which(dup.entrez)), ' lines (', length(dup.entrez.names), ' genes) with replicated EntrezID value.'))
-  ## Formatted input
+  ## Add selection value
+  ### Handling p-value case (no necessary for all types, but light and avoid code rep)
+  pvec <- deres[[p.colname]]
+  pvec[pvec < 1E-320] <- 1E-320
+  ###     - 'stat' :      the value of 'stat.colname'
+  if (gsea.output.value == 'stat') deres$selval <- deres[[stat.colname]]
+  ###     - 'stat.abs' :      the ABSOLUTE value of 'stat.colname'
+  if (gsea.output.value == 'stat.abs') deres$selval <- abs(deres[[stat.colname]])
+  ###     - '-l10p' :         the -log10('p.colname')
+  if (gsea.output.value == '-l10p') deres$selval <- -log10(pvec)
+  ###     - '-l10p.signed' :  the -log10('p.colname') * sign('stat.colname')
+  if (gsea.output.value == '-l10p.signed') deres$selval <- -log10(pvec) * sign(deres[[stat.colname]])
+  ###     - '-l10p.stat' :    the product of -log10('p.colname') * 'stat.colname'
+  if (gsea.output.value == '-l10p.stat') deres$selval <- -log10(pvec) * deres[[stat.colname]]
+  rm(pvec)
+  
   ## GSEA
-  gsea.genevec <- sort(setNames(deres[[stat.colname]], deres$ENTREZID), decreasing = TRUE)
+  gsea.genevec <- sort(setNames(deres$selval, deres$ENTREZID), decreasing = TRUE)
   ## ORA
   if (!is.null(topN.max)) {
     deres2 <- deres[!is.na(deres[[p.colname]]) & !is.na(deres[[stat.colname]]),]
@@ -610,14 +690,15 @@ table2enr <- function(deseq2.res.data = NULL, species = "Homo sapiens", geneid.c
       deres2$abs <- abs(deres2[[stat.colname]])
       stat.colname <- 'abs'
     }
-    deres2 <- deres2[deres2[[p.colname]] < p.cutoff & eval(parse(text = paste0('deres2[["', stat.colname, '"]] ', stat.keep.operator, ' stat.cutoff'))),,drop = FALSE]
+    deres2 <- deres2[deres2[[p.colname]] < p.cutoff & eval(parse(text = paste0('abs(deres2[["', stat.colname, '"]]) ', stat.keep.operator, ' stat.cutoff'))),,drop = FALSE]
     top.keep <- min(nrow(deres2), topN.max)
     ora.genevec <- if(top.keep > 0) setNames(deres2$ENTREZID[1:top.keep], deres2[[geneid.colname]][1:top.keep]) else c()
   } else ora.genevec <- NULL
   
   return(list(gsea.genevec = gsea.genevec,
               ora.genevec = ora.genevec,
-              gene2Symbol = gconv$ENTREZID))
+              gene2Symbol = gconv$ENTREZID,
+              gsea.output.value = gsea.output.value))
 }
 
 ## Wrapper to table2enr that takes as input the results file (the *_complete.tsv table) from our salmon+DESeq2 pipeline (by Thibault Dayris) ====
@@ -633,7 +714,7 @@ pipe2enr <- function(deseq2.res.file = NULL, ...) {
 
 ## Normalize a RAW COUNTS DEseq2 object (DESeqDataSet) with vst, return the normalized counts matrix ====
 ## Extra parameters (...) are passed to DESeq2::vst()
-## Requires DESeq2 and clusterProfiler packages# source('/home/job/gits/customscripts/R/diffexp2gsea.R')
+## Requires DESeq2 and clusterProfiler packages
 DE2obj_to_norm_matrix <- function(DE2obj = NULL, feature_in = 'ENSEMBL', feature_out = 'SYMBOL', species = 'Homo sapiens', out.dir = getwd(), ...) {
   ## Normalizing (vst)
   DE2obj.norm <- DESeq2::vst(object = DE2obj, ...)
@@ -831,7 +912,7 @@ assess_covar <- function(mat = NULL, annot.df = NULL, factor.names = NULL, conti
 ## !!! covars.df MUST have categorical covariates as factors and continuous ones as integers/numerics !!!
 ## !!! If not, characters will be converted to factors, integers to numerics !!!
 ## Supported [red.method] : 'pca', 'mds.spear' (also 'mds.euc' but that is PCA)
-multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.names[1], red.method = 'pca', ndim.max = 10, data.type = 'norm', center = TRUE, scale = TRUE, plot = FALSE, plot.dir = NULL, color.palette = c("white", "orangered3")) {
+multitest_covar <- function(mat = NULL, covars.df = NULL, interest = 'Condition', red.method = 'pca', blind = FALSE, ndim.max = 10, data.type = 'norm', center = TRUE, scale = TRUE, plot = FALSE, plot.dir = NULL, color.palette = c("white", "orangered3")) {
 
   ## Checks
   ### Factors vs numeric
@@ -851,12 +932,25 @@ multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.name
   if (ndim.max <= 0 ) stop('[ndim.max] must be a positive integer !')
   if (!is.null(plot.dir)) {
     if (!dir.exists(plot.dir)) {
-      stop('[plot.dir} does not exist !')
+      # stop('[plot.dir} does not exist !')
     } else {
       plot <- TRUE
     }
   }
-
+  
+  ## Clean factor levels
+  is_fac.covar <- covar_types %in% 'factor'
+  if(any(is_fac.covar)) {
+    ## Clean factor levels
+    for (ct in which(is_fac.covar)) covars.df[[ct]] <- droplevels(covars.df[[ct]])
+    ## Remove single-level factor(s)
+    is_fac.single <- vapply(which(is_fac.covar), function(ct) nlevels(covars.df[[ct]]), 1L) < 2
+    if(any(is_fac.single)) {
+      torem <- which(is_fac.covar)[which(is_fac.single)]
+      covars.df <- covars.df[,-c(torem)]
+    }
+  }
+  
   ## Convert conti to Zscores
   if (any(covar_types %in% 'numeric')) {
     message('Z-scoring continuous covariates ...')
@@ -972,6 +1066,8 @@ multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.name
     return(BC.hm)
   }
   
+  if (plot) suppressWarnings(dir.create(path = plot.dir, recursive = TRUE))
+  
   ### Check if putative wbest is not confounded with interest
   .factor_checker <- function(factors.df = NULL) {
     Xbatch <- Reduce(f = cbind, x = lapply(colnames(factors.df), FUN = function(x) { model.matrix(~factors.df[[x]])[, -1, drop = FALSE] }))
@@ -1010,7 +1106,6 @@ multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.name
         
         # Plot weights ?
         if (plot) {
-          dir.create(path = plot.dir, recursive = TRUE)
           BC.hm <- .bc_heatmap(bc.mat = ac.res$covar.w, color.palette = color.palette, col.types = tmp.covar_types[colnames(ac.res$covar.w)])
           ggplot2::ggsave(filename = paste0(plot.dir, '/COVARS.', interest, '_', sprintf(iter, fmt = '%02d'), '_', if(!is.null(wbest)) wbest else 'unregressed', '.svg'), plot = ggplotify::as.grob(BC.hm), width = 10, height = 7, dpi = 300)
         }
@@ -1020,7 +1115,6 @@ multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.name
     } else {
       # Plot weights ?
       if (plot) {
-        dir.create(path = plot.dir, recursive = TRUE)
         BC.hm <- .bc_heatmap(bc.mat = ac.res$covar.w, color.palette = color.palette, col.types = tmp.covar_types[colnames(ac.res$covar.w)])
         ggplot2::ggsave(filename = paste0(plot.dir, '/COVARS.', interest, '_', sprintf(iter, fmt = '%02d'), '_', if(!is.null(wbest)) wbest else 'unregressed', '.svg'), plot = ggplotify::as.grob(BC.hm), width = 10, height = 7, dpi = 300)
       }
@@ -1080,7 +1174,13 @@ multitest_covar <- function(mat = NULL, covars.df = NULL, interest = factor.name
         
         ## Regress
         message('Regressing for [', wbest, '] ...')
-        suppressMessages(tmp.mat <- matrix_covar_regress(mat = tmp.mat, type = data.type, covar_factor_df = if(wb_type == 'factor') data.frame(covariate = as.factor(tmp.covars.df[[wbest]])) else NULL, covar_conti_df = if(wb_type == 'numeric') data.frame(covariate = tmp.covars.df[[wbest]]) else NULL, group = as.factor(tmp.covars.df[[interest]])))
+        tmp.mat <- matrix_covar_regress(
+          mat = tmp.mat, 
+          type = data.type, 
+          covar_factor_df = if(wb_type == 'factor') data.frame(covariate = as.factor(tmp.covars.df[[wbest]])) else NULL, 
+          covar_conti_df = if(wb_type == 'numeric') data.frame(covariate = tmp.covars.df[[wbest]]) else NULL, 
+          group = if(blind) NULL else as.factor(tmp.covars.df[[interest]]))
+        
         iscore <- cur.score
         
       }
@@ -1344,6 +1444,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## exp.mat                matrix(integer)     Sample x feature (gene) raw count matrix. Feature names as rownames.
 ## annot.df               data.frame          Sample annotations. Should contain a column with the same entries as colnames(exp.mat)
 ## design.df              data.frame          Design of comparisons to perform. Should contain these column names : [Samples_colname] = Column name of sample names ; [Covar_colnames] = Column name(s) of covariates to regress, coma-separated (can be empty if none to regress); [Condition_colname] = Column name of factor condition to explore for the differential analysis ; [Condition_A] = levels to consider as the condition A (test) ; [Condition_B] = levels to consider as the condition B (ref) ; [Comparison_name] = Name to use for results output.
+## method                 character           Statistical method to use for the differential expression test. ['wald'] for DESeq2 Wald test, ['wilcoxon'] for Wilcoxon's sum-rank test
 ## assess.factor          logical             Perform assessment of factor covariates using the provided column name(s) corresponding to factor data columns in annot.df
 ## assess.conti           logical             Perform assessment of continuous covariates using the provided column name(s) corresponding to continuous data columns in annot.df
 ## min_count              0<int>+inf          Minimum total counts to keep a feature (gene) : allows to discarded not/poorly expressed features. NULL corresponds to an "automatic" mode were the value is set at 1/10th of the number of samples in the matrix (rounded)
@@ -1374,7 +1475,7 @@ matrix_covar_regress <- function(mat = NULL, type = 'counts', covar_factor_df = 
 ## boxplots               bool                If TRUE, draw boxplots of or.top.max genes
 ## save.wald              bool                If TRUE, save the DESeq2 object containing the results of the Wald test. This is FALSE by default, as the resulting object can be pretty big.
 ## color.palette          vec(color)          Vector of 3 colors used for the expression heatmap (lower values, middle, higher)
-DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.factor = NULL, assess.conti = NULL, min_count = NULL, min_var = NULL,  min_sample_freq = .5, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
+DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, method = 'wald', assess.factor = NULL, assess.conti = NULL, min_count = NULL, min_var = NULL,  min_sample_freq = .5, per_class = TRUE, vst_nsub = 1000, adjp.max = 5E-02, lfc.min = .7, ihw = TRUE, lfcShrink = TRUE, enrp.max = 1E-02, enr.min.genes = 10, or.top.max = 100, outdir = getwd(), samples.dist.method = 'spearman', samples.hclust.method = 'ward.D', genes.dist.method = 'spearman', genes.hclust.method = 'ward.D', msigdb.do = c(TRUE, TRUE), do.do = c(TRUE, TRUE), go.do = c(TRUE, TRUE), kegg.do = c(TRUE, TRUE), wp.do = c(TRUE, TRUE), reactome.do = c(TRUE, TRUE), mesh.do = c(FALSE, FALSE), custom.do = c(FALSE, FALSE), custom_gmt_list = NULL, gsea.force = FALSE, species = 'Homo sapiens', dotplot.maxterms = 50, my.seed = 1234L, boxplots = TRUE, save.wald = FALSE, heatmap.palette = c("royalblue3", "ivory", "orangered3"), BPPARAM = BiocParallel::SerialParam()) {
   
   if (tolower(species) == 'homo sapiens') {
     Org <- 'org.Hs'
@@ -1426,6 +1527,9 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
     if(min_count < 0) stop('min_count should be a positive integer !')
   }
   if(!is.logical(per_class)) stop('per_class should be a logical !')
+  valid_method <- c('wald', 'wilcoxon')
+  if (!tolower(method) %in% valid_method) stop('Unrecognized statistical method th use !')
+  
   
   
   suppressPackageStartupMessages(library(DESeq2))
@@ -1600,15 +1704,18 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
     
     ## Normalizing by vst (for PCA & heatmap) ====
     DE2obj.norm <- DESeq2::vst(object = DE2obj, blind = TRUE, nsub = vst_nsub)
+    # DE2obj.norm <- DESeq2::vst(object = DE2obj, blind = FALSE, nsub = vst_nsub)
     
     ## Defining the VST-normalized matrix as default normalized data
     norm.mat <- SummarizedExperiment::assay(DE2obj.norm)
     
     ## Save VST matrix 
+    saveRDS(object = norm.mat, file = paste0(de.dir, '/Normalized.vst_matrix.RDS'), compress = 'xz')
     write.table(x = data.frame(Feature = rownames(norm.mat), norm.mat, check.names = FALSE), file = gzfile(paste0(de.dir, '/Normalized.vst_matrix.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
 
     ## Assessing DESIGN covariates, and regressing if requested ====
     if (length(cur.covars) > 0) {
+      
       ### Assessing covariates
       #### Splitting factor and continuous covariates
       factor.colnames <- conti.colnames <- NULL
@@ -1646,22 +1753,19 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
       ### REGRESSED
       #### Performing regression
       ber_method <- NULL
+      # regress.mat <- NULL
       if (length(factor.colnames) == 1 & is.null(conti.colnames) && min(table(SummarizedExperiment::colData(DE2obj)[[factor.colnames[1]]])) > 1) {
         ## sva::Combat_seq case !
         ber.method <- 'CombatSeq'
-        ber_mat <- try(
-          DESeq2::vst(
-            object = matrix_covar_regress(
-              mat = SummarizedExperiment::assay(DE2obj)
-              , type = 'counts'
-              , covar_factor_df = if(is.null(factor.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, factor.colnames, drop = FALSE]
-              , covar_conti_df = if(is.null(conti.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, conti.colnames, drop = FALSE]
-              , group = as.factor(SummarizedExperiment::colData(DE2obj)[[cur.cond]])
-              )
-            , blind = TRUE
-            , nsub = vst_nsub
-            )
-          , silent = TRUE)
+        tmp.mat <- try(matrix_covar_regress(
+          mat = SummarizedExperiment::assay(DE2obj)
+          , type = 'counts'
+          , covar_factor_df = if(is.null(factor.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, factor.colnames, drop = FALSE]
+          , covar_conti_df = if(is.null(conti.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, conti.colnames, drop = FALSE]
+          # , group = as.factor(SummarizedExperiment::colData(DE2obj)[[cur.cond]])
+          , group = NULL
+        ), silent = TRUE)
+        ber_mat <- DESeq2::vst(object = tmp.mat, blind = TRUE, nsub = vst_nsub)
       } else {
         ## limma::RemoveBatchEffect case !
         ber_method <- 'limma'
@@ -1671,14 +1775,16 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
             , type = 'norm'
             , covar_factor_df = if (is.null(factor.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, factor.colnames, drop = FALSE]
             , covar_conti_df = if (is.null(conti.colnames)) NULL else as.data.frame(SummarizedExperiment::colData(DE2obj))[, conti.colnames, drop = FALSE]
-            , group = as.factor(SummarizedExperiment::colData(DE2obj)[[cur.cond]])
+            # , group = as.factor(SummarizedExperiment::colData(DE2obj)[[cur.cond]])
+            , group = NULL
             )
           , silent = TRUE)
       }
       
       ## If no error, one can assess the regression results
       if (!is(ber_mat, class2 = 'try-error')) {
-        ## Save BER matrix 
+        ## Save BER matrix
+        saveRDS(object = ber_mat, file = paste0(de.dir, '/Normalized.vst.BER.', ber_method, '.RDS'), compress = 'xz')
         write.table(x = data.frame(Feature = rownames(ber_mat), ber_mat, check.names = FALSE), file = gzfile(paste0(de.dir, '/Normalized.vst.BER.', ber_method, '_matrix.tsv.gz')), sep = '\t', quote = FALSE, row.names = FALSE)
         
         ### Assessing covariates (after regression)
@@ -1800,15 +1906,61 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
     }
     
     ### PCAs for DESIGN covariates ====
-    library(ggfortify)
-    for (p in c(cur.cond, cur.covars)) {
-      pf <- paste0(de.dir, '/PCA_vst_', p, '.svg')
-      ph <- 1000
-      pw <- 1100
-      svg(filename = pf, width = pw/96, height = ph/96)
-      try(print(ggplot2::autoplot(prcomp(t(norm.mat)), data = as.data.frame(SummarizedExperiment::colData(DE2obj)), colour = p, size = 3, label = TRUE, label.label = 'rownames')), silent = TRUE)
-      svg_off()
+    # library(ggfortify)
+    # for (p in c(cur.cond, cur.covars)) {
+    #   pf <- paste0(de.dir, '/PCA_vst_', p, '.svg')
+    #   ph <- 1000
+    #   pw <- 1100
+    #   svg(filename = pf, width = pw/96, height = ph/96)
+    #   try(print(ggplot2::autoplot(prcomp(t(norm.mat)), data = as.data.frame(SummarizedExperiment::colData(DE2obj)), colour = p, size = 3, label = TRUE, label.label = 'rownames')), silent = TRUE)
+    #   svg_off()
+    # }
+    ### WIP
+    ### PCAs for DESIGN covariates ====
+    #### UNREGRESSED
+    ori.mat <- SummarizedExperiment::assay(DESeq2::vst(object = DE2obj, blind = TRUE, nsub = topvar))
+    for (topx in c(FALSE, TRUE)) {
+      if (topx) {
+        pca_mat <- ori.mat[rank(-matrixStats::rowVars(ori.mat)) <= topvar,]
+        topxword <- paste0('Top', topvar)
+      } else {
+        pca_mat <- ori.mat
+        topxword <- 'All'
+      }
+      for (bc in c(cur.cond, covars)) {
+        out_f <- paste0(de.dir, '/', paste(c('PCA', bc, topxword, '01', 'unregressed'), collapse = '_'))
+        pca_res <- prcomp(x = pca_mat, center = TRUE, scale. = TRUE)
+        plot_df <- data.frame(pca_res$rotation[,1:2], condition = DE2obj[[bc]], name = gsub(pattern = '( |\\||\\/|_S01_L01)+', replacement = '.', x = colnames(pca_mat)))
+        p <- ggplot2::ggplot(data = plot_df, mapping = ggplot2::aes(x = PC1, y = PC2, color = condition)) + ggplot2::geom_point(ggplot2::aes(color = condition), size = 1)
+        if (is.factor(plot_df$condition)) {
+          p <- p + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = plot_df$PC1, split = plot_df$condition), PC2 = get_medoid(x = plot_df$PC2, split = plot_df$condition), condition = levels(plot_df$condition), check.names = FALSE), shape = 13, size = 5)
+        }
+        p <- p + ggrepel::geom_text_repel( ggplot2::aes(label = name), size = 2, box.padding   = 0.35, point.padding = 0.5, segment.color = 'grey50', max.overlaps = 20) +  ggplot2::labs(title = bc)
+        ggmulti(gg_object = p, devices = c('svg', 'png'), width = 1500, height = 1200, dpi = 200, file = out_f)
+      }
     }
+    #### REGRESSED
+    for (topx in c(FALSE, TRUE)) {
+      if (topx) {
+        pca_mat <- norm.mat[rank(-matrixStats::rowVars(norm.mat)) <= topvar,]
+        topxword <- paste0('Top', topvar)
+      } else {
+        pca_mat <- norm.mat
+        topxword <- 'All'
+      }
+      for (bc in c(cur.cond, covars)) {
+        out_f <- paste0(de.dir, '/', paste(c('PCA', bc, topxword, '02', 'regressed'), collapse = '_'))
+        pca_res <- prcomp(x = pca_mat, center = TRUE, scale. = TRUE)
+        plot_df <- data.frame(pca_res$rotation[,1:2], condition = DE2obj[[bc]], name = gsub(pattern = '( |\\||\\/|_S01_L01)+', replacement = '.', x = colnames(pca_mat)))
+        p <- ggplot2::ggplot(data = plot_df, mapping = ggplot2::aes(x = PC1, y = PC2, color = condition)) + ggplot2::geom_point(ggplot2::aes(color = condition), size = 1)
+        if (is.factor(plot_df$condition)) {
+          p <- p + ggplot2::geom_point(data = data.frame(PC1 = get_medoid(x = plot_df$PC1, split = plot_df$condition), PC2 = get_medoid(x = plot_df$PC2, split = plot_df$condition), condition = levels(plot_df$condition), check.names = FALSE), shape = 13, size = 5)
+        }
+        p <- p + ggrepel::geom_text_repel( ggplot2::aes(label = name), size = 2, box.padding   = 0.35, point.padding = 0.5, segment.color = 'grey50', max.overlaps = 20) +  ggplot2::labs(title = bc)
+        ggmulti(gg_object = p, devices = c('svg', 'png'), width = 1500, height = 1200, dpi = 200, file = out_f)
+      }
+    }
+    
     
     ## Assessing TEST covariates, and regressing if requested
     if (any(!is.null(c(assess.factor, assess.conti)))) {
@@ -2128,6 +2280,60 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
     rm(DE2obj.norm)
     
     ## Performing the DE test ====
+    if (tolower(method) %in% 'wilcoxon') {
+      ## Perform tests
+      wres_list <- lapply(seq_len(nrow(norm.mat)), function(fx) {
+        wres <- wilcox.test(x = norm.mat[fx,], formula = as.formula(paste0('~', cur.cond)), data = as.data.frame(SummarizedExperiment::colData(DE2obj)), alternative = 'two.sided', exact = TRUE)
+        popA <- norm.mat[fx, DE2obj[[cur.cond]] == cur.condA]
+        popB <- norm.mat[fx, DE2obj[[cur.cond]] == cur.condB]
+        wres$N.A <- length(popA)
+        wres$N.B <- length(popB)
+        wres$median.A <- median(popA, na.rm = TRUE)
+        wres$median.B <- median(popB, na.rm = TRUE)
+        wres$mean.A <- mean(popA, na.rm = TRUE)
+        wres$mean.B <- mean(popB, na.rm = TRUE)
+        wres$sd.A <- sd(popA, na.rm = TRUE)
+        wres$sd.B <- sd(popB, na.rm = TRUE)
+        return(wres)
+      })
+      ## Aggregate results
+      wres_df <- data.frame(
+        Feature = rownames(norm.mat)
+        ,
+        W = vapply(wres_list, function(x) x$statistic, .1)
+        ,
+        RawP = vapply(wres_list, function(x) x$p.value, .1)
+      )
+      wres_df$AdjP <- p.adjust(p = wres_df$RawP, method = 'BH')
+      wres_df[[paste0('N.', cur.condA)]] <- vapply(wres_list, function(x) x$N.A, 1L)
+      wres_df[[paste0('N.', cur.condB)]] <- vapply(wres_list, function(x) x$N.B, 1L)
+      wres_df[[paste0('Median.', cur.condA)]] <- vapply(wres_list, function(x) x$median.A, .1)
+      wres_df[[paste0('Median.', cur.condB)]] <- vapply(wres_list, function(x) x$median.B, .1)
+      wres_df[[paste0('Mean.', cur.condA)]] <- vapply(wres_list, function(x) x$mean.A, .1)
+      wres_df[[paste0('Mean.', cur.condB)]] <- vapply(wres_list, function(x) x$mean.B, .1)
+      wres_df[[paste0('Sd.', cur.condA)]] <- vapply(wres_list, function(x) x$sd.A, .1)
+      wres_df[[paste0('Sd.', cur.condB)]] <- vapply(wres_list, function(x) x$sd.B, .1)
+      wres_df <- wres_df[order(wres_df$W, wres_df$RawP, decreasing = c(TRUE, FALSE)),]
+      
+      summary(wres_df)
+      
+      length(unique(wres_df$W))
+      length(unique(wres_df$RawP))
+      length(unique(wres_df$AdjP))
+      
+      ## MA plot
+      plot(log2(rowMeans(norm.mat)) /2, log2(wres_df$Mean.MicroInv / wres_df$Mean.DCIS_near), pch = '.', cex = 5)
+      # sigz <- wres_df$AdjP < adjp.max
+      sigz <- wres_df$AdjP < 5E-6
+      points(log2(rowMeans(norm.mat[sigz,])) /2, log2(wres_df$Mean.MicroInv[sigz] / wres_df$Mean.DCIS_near[sigz]), pch = '.', cex = 5, col = 2)
+      abline(h = 0, col = 4, lwd = 3)
+      
+      ## Volcano
+      plot(log2(wres_df$Mean.MicroInv / wres_df$Mean.DCIS_near), -log10(wres_df$AdjP), pch = '.', cex = 5)
+      l2fc <- wres_df$Median.MicroInv / wres_df$Median.DCIS_near
+      
+    }
+    if (tolower(method) %in% 'wald') {}
     set.seed(my_seed)
     htg.de.wald <- DESeq2::DESeq(DE2obj)
     
@@ -2388,7 +2594,7 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
           my.t2g <- msigdb_to_t2g(species = species, category = msigdb.collec[msigdb.collec$tag == mc,1], subcategory = msigdb.collec[msigdb.collec$tag == mc,2])
           ### GSEA
           if (msigdb.do[[mc]][1]) {
-            my.gsea.res <- try(gsea_run(geneList = enr.inputs$gsea.genevec, species = species, func.name = 'clusterProfiler::GSEA', t2g = my.t2g, t2g.name = msc, gene2Symbol = enr.inputs$gene2Symbol, seed = my.seed, pvalueCutoff = enrp.max, minGSSize = enr.min.genes))
+            my.gsea.res <- try(gsea_run(geneList = enr.inputs$gsea.genevec, species = species, func.name = 'clusterProfiler::GSEA', t2g = my.t2g, t2g.name = paste(c(msc, enr.inputs$gsea.output.value), collapse = '.'), gene2Symbol = enr.inputs$gene2Symbol, seed = my.seed, pvalueCutoff = enrp.max, minGSSize = enr.min.genes))
             ## Generate plots / outputs
             if (!is(my.gsea.res, class2 = 'try-error')) gsea_output(gseaResult = my.gsea.res, out.dir = cut.dir, comp.name = cur.name, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms, gsea.plot = dotplot.maxterms, ridgeplot = dotplot.maxterms)
           }
@@ -2418,10 +2624,10 @@ DEA_run <- function(exp.mat = NULL, annot.df = NULL, design.df = NULL, assess.fa
                 my.gsea.res <- enrichplot::pairwise_termsim(my.gsea.res)
                 my.gsea.res.simp <- clusterProfiler::simplify(my.gsea.res, cutoff = 0.7, by = "p.adjust", select_fun = min)
                 if(nrow(my.gsea.res.simp) < nrow(my.gsea.res)) {
-                  my.gsea.res.simp@setType <- paste(c(func.name, x, 'simplified'), collapse = '_')
+                  my.gsea.res.simp@setType <- paste(c(paste(c(func.name, x, 'simplified'), collapse = '_'), enr.inputs$gsea.output.value), collapse = '.')
                   gsea_output(gseaResult = my.gsea.res.simp, out.dir = cut.dir, comp.name = cur.name, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms, gsea.plot = dotplot.maxterms, ridgeplot = dotplot.maxterms)
                 } else {
-                  my.gsea.res@setType <- paste(c(func.name, x), collapse = '_')
+                  my.gsea.res@setType <- paste(c(paste(c(func.name, x), collapse = '_'), enr.inputs$gsea.output.value), collapse = '.')
                   gsea_output(gseaResult = my.gsea.res, out.dir = cut.dir, comp.name = cur.name, heatplot = dotplot.maxterms, dotplot = dotplot.maxterms, barplot = dotplot.maxterms, gsea.plot = dotplot.maxterms, ridgeplot = dotplot.maxterms)
                 }
               }
@@ -2920,13 +3126,17 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
 
 
 ## Perform GSVA on a symbols x samples normalized expression matrix ====
-  gsva_run <- function(exp_mat = NULL, gmt_files = NULL, enr_min_genes = 10, species = 'homo sapiens', out_dir = getwd()) {
+gsva_run <- function(exp_mat = NULL, gmt_files = NULL, matrix_gene_type = 'SYMBOL', enr_min_genes = 10, species = 'homo sapiens', gsva_mode = 'new', out_dir = getwd()) {
   ## Checks
   if (is.null(exp_mat)) stop('An expression matrix is required !')
   if (is.null(gmt_files)) stop('No GMT provided !')
   if (!is.matrix(exp_mat)) stop('Provided exp_mat is not a matrix !')
   if (!all(file.exists(gmt_files))) stop('At least one of the provided GMT(s) was not found !')
   if (!dir.exists(paths = out_dir)) stop('Provided out_dir does not exist !')
+  valid_gene_type <- c('SYMBOL', 'ENTREZID')
+  matrix_gene_type <- toupper(matrix_gene_type)
+  if (!matrix_gene_type %in% valid_gene_type) stop('Matrix gene type should be one of [',paste(valid_gene_type, collapse = ','), '] !')
+  
   
   ## Run
   
@@ -2943,14 +3153,16 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
     message('Only "homo sapiens" and "Mus musculus" are supported !')
     Org <- NULL
   }
-  ### Convert expression features to ENTREZ
-  g_conv <- suppressWarnings(suppressMessages(clusterProfiler::bitr(geneID = rownames(exp_mat), fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = paste0(Org, '.eg.db'))))
-  g_conv <- g_conv[!(duplicated(g_conv$SYMBOL) | duplicated(g_conv$ENTREZID)),]
-  s2e <- setNames(object = g_conv$ENTREZID, nm = g_conv$SYMBOL)
-  rm(g_conv)
-  geo_gsva <- exp_mat[rownames(exp_mat) %in% names(s2e),]
-  rownames(geo_gsva) <- s2e[rownames(geo_gsva)]
-  rm(s2e, exp_mat)
+  ### Convert expression features to ENTREZID
+  if (matrix_gene_type == 'SYMBOL') {
+    g_conv <- suppressWarnings(suppressMessages(clusterProfiler::bitr(geneID = rownames(exp_mat), fromType = 'SYMBOL', toType = 'ENTREZID', OrgDb = paste0(Org, '.eg.db'))))
+    g_conv <- g_conv[!(duplicated(g_conv$SYMBOL) | duplicated(g_conv$ENTREZID)),]
+    s2e <- setNames(object = g_conv$ENTREZID, nm = g_conv$SYMBOL)
+    rm(g_conv)
+    exp_mat <- exp_mat[rownames(exp_mat) %in% names(s2e),]
+    rownames(exp_mat) <- s2e[rownames(exp_mat)]
+    rm(s2e)
+  }
   
   ## Looping on GMTs
   gsva_all <- lapply(seq_along(gmt_files), function(g) {
@@ -2963,16 +3175,18 @@ immunedeconv_run <- function(exp_mat = NULL, to_tpm = TRUE, methods = c('quantis
     gmt_db <- suppressWarnings(suppressMessages(GSEABase::getGmt(con = gmt_file, geneIdType = GSEABase::EntrezIdentifier(), collectionType = GSEABase::NullCollection())))
     
     ## RUN (old package version)
-    gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(expr = geo_gsva, gset.idx.list = gmt_db, kcdf = 'Gaussian', min.sz = enr_min_genes)))
+    if (gsva_mode == 'old') gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(expr = exp_mat, gset.idx.list = gmt_db, kcdf = 'Gaussian', min.sz = enr_min_genes)))
     
-    # ## RUN (newer package version)
-    # ## Create gParam from expression matrix and terms
-    # g_param <- suppressWarnings(suppressMessages(GSVA::gsvaParam(exprData = geo_gsva, geneSets = gmt_db, kcdf = 'Gaussian', minSize = enr_min_genes)))
-    # ## Run GSVA
-    # gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(param = g_param, verbose = FALSE)))
+    ## RUN (newer package version)
+    ## Create gParam from expression matrix and terms
+    if (gsva_mode == 'new') {
+      g_param <- suppressWarnings(suppressMessages(GSVA::gsvaParam(exprData = exp_mat, geneSets = gmt_db, kcdf = 'Gaussian', minSize = enr_min_genes)))
+      ## Run GSVA
+      gsva_res <- suppressWarnings(suppressMessages(GSVA::gsva(param = g_param, verbose = FALSE)))
+    }
     
     ### OL detection : grDevices::boxplot.stats
-    if(nrow(gsva_res)>=3) {
+    if(nrow(exp_mat)>=3) {
       bx_res <- lapply(seq_len(ncol(gsva_res)), function(k) {
         es_data <- gsva_res[,k, drop = TRUE]
         es_res <- grDevices::boxplot.stats(x = es_data)
@@ -3078,6 +3292,8 @@ gsva_diff_run <- function(gsva_res = NULL, annot_df = NULL, method = 'KW', paire
       kw_l <- sapply(seq_len(nrow(gsva_res[[ga]])), function(x) {
         # message(x)
         data_df <- data.frame(gsva = unname(unlist(gsva_res[[ga]][x,])), class = as.factor(annot_df[[ppf]]))
+        ## Remove NAs in class (way to synch subpopulations from annotation to gsva results)
+        data_df <- data_df[!is.na(data_df$class),]
         ## Testing the number of levels
         if (nlevels(data_df$class) < 2) {
           kw_df <- data.frame(Statistic = rep(x = NA, nrow(data_df)))
@@ -3254,6 +3470,87 @@ gsva_cor_run <- function(gsva_res = NULL, annot_df = NULL, method = 'spearman', 
 ### . 'minGSSize' : integer ; minimal size of each geneSet for analyzing (see clusterProfiler::GSEA)
 ### . '...' : any other parameter to pass to 'func.name'
 ### NOTE : For input ('geneList'), ALWAYS use all available genes (ie, not limited to significant differentially expressed genes), as intended for GSEA analysis. NEVER use a selection of genes (results will be corrupt). Please also be careful that you may obtain significant GSEA results from a list of values corresponding to NO significant genes (as GSEA only needs the order of these genes). In this case you may talk about "tendencies" of enrichment in your differential expression results.
+# gsea_run <- function(geneList = NULL, func.name = 'clusterProfiler::GSEA', species = 'Homo sapiens', t2g = NULL, t2g.name = NULL, gene2Symbol = NULL, seed = 1337, pvalueCutoff = 5E-02, minGSSize = 10, verbose = FALSE, ...) {
+#   
+#   if (!verbose) options(warn=-1)
+#   
+#   ## Checks
+#   if (any(!is.numeric(geneList))) stop("'geneList' should be a decreasingly sorted numeric vector, named with EntrezIDs.")
+#   if (length(names(geneList)) == 0) stop("'geneList' should be a decreasingly sorted numeric vector, named with EntrezIDs.")
+#   if (!all(geneList == sort(geneList, decreasing = TRUE))) stop("'geneList' should be a decreasingly sorted numeric vector, named with EntrezIDs.")
+#   if (!is.character(func.name)) stop("'func.name' should be a character.")
+#   if (!is.character(species)) stop("'species' should be a character.")
+#   valid.species <- msigdbr::msigdbr_species()$species_name
+#   if (!(species %in% valid.species)) stop(paste0("Unsupported 'species'. Expecting one of : '", paste(valid.species, collapse = "', '"), '.'))
+#   if (!is.null(t2g) & is.null(t2g.name)) stop("'t2g' provided but no 't2g.name'.")
+#   if (!is.null(t2g.name) & is.null(t2g)) stop("'t2g.name' provided but no 't2g'.")
+#   if (!is.null(gene2Symbol)) {
+#     if (any(!is.character(gene2Symbol))) stop("'gene2Symbol' shoud be a character vector, named with EntrezIDs.")
+#     if (length(names(gene2Symbol)) == 0) stop("'gene2Symbol' shoud be a character vector, named with EntrezIDs.")
+#   }
+#   if (!is.numeric(seed)) stop("'seed' should be an integer.")
+#   if (!is.numeric(pvalueCutoff)) stop("'pvalueCutoff' should be a positive, < 1, numeric")
+#   if (!(pvalueCutoff >= 0)) stop("'pvalueCutoff' should be a positive, < 1, numeric")
+#   if (!(pvalueCutoff <= 1)) stop("'pvalueCutoff' should be a positive, < 1, numeric")
+#   if (!is.numeric(minGSSize)) stop("'minGSSize' should be an integer.")
+#   if (!(minGSSize > 0)) stop("'minGSSize' should a non-null positive integer.")
+#   if (minGSSize < 10) warning("'minGSSize' < 10 : expect no result !")
+#   
+#   ## Loading the requested function
+#   func.split <- unlist(strsplit(func.name, '::'))
+#   gse.function <- base::get(func.split[2], envir = loadNamespace(func.split[1]))
+#   
+#   if (func.name == 'clusterProfiler::GSEA') {
+#     if (is.null(t2g)) stop("When calling this function with func.name = 'clusterProfiler::GSEA', a value is required for 't2g'")
+#     if (is.null(t2g.name)) stop("When calling this function with func.name = 'clusterProfiler::enricher', a value is required for 't2g.name'")
+#     
+#     ## Functions requiring a TERM2GENE (msigdbr, CellMarkers, ...)
+#     gsea.res <- gse.function(geneList = geneList, TERM2GENE = t2g, pvalueCutoff = pvalueCutoff, minGSSize = minGSSize, seed = seed, ...)
+#     func.name <- paste(c(func.name, t2g.name), collapse = '_')
+#   } else if (func.name == 'meshes::gseMeSH') {
+#     ## MeSH (requires additional 'MeSHDb', 'database' and 'category' parameters)
+#     mesh.sp <- paste0(c('MeSH.', substr(unlist(strsplit(species, ' ')), c(1, 1), c(1,2)), '.eg.db'), collapse = '')
+#     gsea.res <- try(gse.function(geneList = geneList, MeSHDb = mesh.sp, pvalueCutoff = pvalueCutoff, minGSSize = minGSSize, seed = seed, ...), silent = TRUE)
+#     gc()
+#     if (is(gsea.res, class2 = 'try-error')) return(ora.res)
+#   } else {
+#     if ('kegg' %in% tolower(func.name)) {
+#       ## KEGG / KEGGM (requires a custom species name in 'organism' parameter)
+#       kegg.sp <- tolower(paste0(substr(unlist(strsplit(species, ' ')), c(1, 1), c(1,2)), collapse = ''))
+#       gsea.res <- gse.function(geneList = geneList, organism = kegg.sp, pvalueCutoff = pvalueCutoff, minGSSize = minGSSize, seed = seed, ...)
+#     } else if (species != 'Homo sapiens') stop(paste0("Function '", func.name, "' can only be used with the 'Homo sapiens' species.")) else {
+#       ## OTHER (generic functions without TERM2GENE or custom parameters, like those in DOSE package, or clusterProfiler::gseGO)
+#       gsea.res <- gse.function(geneList = geneList, pvalueCutoff = pvalueCutoff, minGSSize = minGSSize, seed = seed, ...)
+#     }
+#   }
+#   
+#   ## Adding some useful metadata
+#   if(!is.null(gsea.res)) {
+#     gsea.res@organism <- species
+#     gsea.res@setType <- func.name
+#     if(!is.null(gene2Symbol)) {
+#       gsea.res@gene2Symbol <- gene2Symbol
+#       gsea.res@keytype <- 'ENTREZID'
+#     }
+#   }
+#   
+#   if (!verbose) options(warn=1)
+#   
+#   return(gsea.res)
+# }
+
+
+### Perform GSEA (v2) ====
+### . 'geneList' : numeric vector : a named vector of decreasing values, with EntrezIDs as names
+### . 'species' : character ; a species name, as in the 'species_name' column of msigdbr::msigdbr_species()
+### . 'category' : character ; an MSigDB category, as in the 'gs_cat' column of msigdbr::msigdbr_collections()
+### . 'subcategory' : character ; an MSigDB category, as in the 'gs_subcat' column of msigdbr::msigdbr_collections()
+### . 'gene2Symbol' : character vector ; a named vector of EntrezIDs, with corresponding Symbol or EnsemblID as names
+### . 'seed' : integer ; the random number generation seed
+### . 'pvalueCutoff' : numeric ; minimum FDR-adjusted p-value for signficantly enriched terms (see clusterProfiler::GSEA)
+### . 'minGSSize' : integer ; minimal size of each geneSet for analyzing (see clusterProfiler::GSEA)
+### . '...' : any other parameter to pass to 'func.name'
+### NOTE : For input ('geneList'), ALWAYS use all available genes (ie, not limited to significant differentially expressed genes), as intended for GSEA analysis. NEVER use a selection of genes (results will be corrupt). Please also be careful that you may obtain significant GSEA results from a list of values corresponding to NO significant genes (as GSEA only needs the order of these genes). In this case you may talk about "tendencies" of enrichment in your differential expression results.
 gsea_run <- function(geneList = NULL, func.name = 'clusterProfiler::GSEA', species = 'Homo sapiens', t2g = NULL, t2g.name = NULL, gene2Symbol = NULL, seed = 1337, pvalueCutoff = 5E-02, minGSSize = 10, verbose = FALSE, ...) {
   
   if (!verbose) options(warn=-1)
@@ -3322,6 +3619,7 @@ gsea_run <- function(geneList = NULL, func.name = 'clusterProfiler::GSEA', speci
   
   return(gsea.res)
 }
+
 
 ## Create plots for gsea_run() ====
 ### . 'gseaResult' : gseaResult object ; an output from the gsea_run() function
